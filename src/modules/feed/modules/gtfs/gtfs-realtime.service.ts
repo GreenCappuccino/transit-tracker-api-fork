@@ -19,6 +19,46 @@ import { IGetScheduleForRouteAtStopResult } from "./queries/list-schedule-for-ro
 type ITripUpdate = GtfsRt.ITripUpdate
 type IStopTimeUpdate = GtfsRt.TripUpdate.IStopTimeUpdate
 
+const StopTimeScheduleRelationship =
+  GtfsRt.TripUpdate.StopTimeUpdate.ScheduleRelationship
+
+/**
+ * Whether a stop time update actually says anything about when the vehicle will
+ * arrive.
+ *
+ * GTFS-RT allows an update to reference a stop while explicitly disclaiming any
+ * prediction for it — `NO_DATA` — and producers also send updates whose arrival
+ * and departure objects are present but carry neither a time nor a delay. Such
+ * an update tells us nothing, and treating it as realtime is worse than
+ * admitting ignorance: the schedule gets presented as a live prediction.
+ *
+ * Note the relationship is compared against NO_DATA rather than against
+ * SCHEDULED. `decodeTripUpdatesOnly` converts without protobuf defaults, so an
+ * unset relationship arrives as `undefined`, not `0`.
+ */
+function hasPrediction(update?: DeepReadonly<IStopTimeUpdate>): boolean {
+  if (!update) {
+    return false
+  }
+
+  if (update.scheduleRelationship === StopTimeScheduleRelationship.NO_DATA) {
+    return false
+  }
+
+  return [update.arrival, update.departure].some(
+    (event) =>
+      typeof event?.time === "number" || typeof event?.delay === "number",
+  )
+}
+
+/**
+ * A skipped stop carries no prediction but must still be matched, because
+ * GtfsService drops the trip on the strength of it.
+ */
+function isSkipped(update: DeepReadonly<IStopTimeUpdate>): boolean {
+  return update.scheduleRelationship === StopTimeScheduleRelationship.SKIPPED
+}
+
 export type TripUpdateIndex = Map<
   string,
   ReadonlyArray<DeepReadonly<ITripUpdate>>
@@ -257,7 +297,10 @@ export class GtfsRealtimeService {
     return {
       departureTime,
       arrivalTime,
-      isRealtime: !!stopTimeUpdate,
+      // Not merely "an update existed" -- it has to have told us something.
+      // Otherwise a NO_DATA stop, or one whose arrival/departure objects are
+      // empty, reports the scheduled time as though it were live.
+      isRealtime: hasPrediction(stopTimeUpdate),
     }
   }
 
@@ -304,8 +347,14 @@ export class GtfsRealtimeService {
 
     let stopTimeUpdate = tripUpdate?.stopTimeUpdate?.find(
       (update) =>
-        update.stopSequence === trip.stop_sequence ||
-        update.stopId === trip.stop_id,
+        (update.stopSequence === trip.stop_sequence ||
+          update.stopId === trip.stop_id) &&
+        // An update that predicts nothing must not shadow the fallback below.
+        // Producers routinely send NO_DATA for stops they cannot predict, and
+        // matching it here would discard a usable delay from an earlier stop.
+        // Skipped stops are the exception: they predict nothing by nature, but
+        // GtfsService needs to see them in order to drop the trip.
+        (hasPrediction(update) || isSkipped(update)),
     )
 
     // If no exact match, find the latest stop update before our stop as fallback
@@ -314,7 +363,13 @@ export class GtfsRealtimeService {
         .filter(
           (update) =>
             typeof update.stopSequence === "number" &&
-            update.stopSequence < trip.stop_sequence,
+            update.stopSequence < trip.stop_sequence &&
+            // Only a delay survives the synthesis below, so an earlier stop
+            // that carries absolute times but no delay would synthesise an
+            // empty update -- which then reads as realtime while contributing
+            // nothing. Require a delay we can actually carry forward.
+            (typeof update.arrival?.delay === "number" ||
+              typeof update.departure?.delay === "number"),
         )
         .sort((a, b) => b.stopSequence! - a.stopSequence!)
 
@@ -333,7 +388,14 @@ export class GtfsRealtimeService {
       }
     }
 
-    const vehicle = tripUpdate?.vehicle?.label ?? null
+    // Fall back to the vehicle id when no label is set. NJ TRANSIT's rail feed
+    // carries the train number in `id` and leaves `label` unset, while its bus
+    // feed sets `label` to an empty string -- so neither a plain `??` nor a
+    // label-only read works.
+    const vehicle =
+      tripUpdate?.vehicle?.label?.trim() ||
+      tripUpdate?.vehicle?.id?.trim() ||
+      null
 
     return { tripUpdate, stopTimeUpdate, vehicle }
   }

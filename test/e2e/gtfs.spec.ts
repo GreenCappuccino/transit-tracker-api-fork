@@ -788,6 +788,121 @@ describe("GTFS E2E test", () => {
         expect(trip!.isRealtime).toBe(true)
       })
 
+      // A NO_DATA stop predicts nothing. Reporting it as realtime showed the
+      // scheduled time wearing a live badge.
+      test("is not realtime for a NO_DATA stop", async () => {
+        fakeGtfs.setTripUpdates([
+          {
+            trip: {
+              tripId: "CITY1",
+              startDate: "20080104",
+              scheduleRelationship:
+                GtfsRt.TripDescriptor.ScheduleRelationship.SCHEDULED,
+            },
+            stopTimeUpdate: [
+              {
+                stopSequence: 2,
+                scheduleRelationship:
+                  GtfsRt.TripUpdate.StopTimeUpdate.ScheduleRelationship.NO_DATA,
+              },
+            ],
+            vehicle: { id: "53967", label: "1594" },
+          },
+        ])
+
+        const trips = await getTripSchedule("testfeed:CITY,testfeed:NADAV")
+        const trip = trips.find((trip) => trip.tripId === "testfeed:CITY1")
+        expect(trip).toBeDefined()
+
+        expect(trip!.arrivalTime).toBe(1199455920)
+        expect(trip!.departureTime).toBe(1199456040)
+        expect(trip!.isRealtime).toBe(false)
+        expect(trip!.vehicle).toBeNull()
+      })
+
+      // NO_DATA at our stop used to shadow a usable delay from an earlier one.
+      test("falls through a NO_DATA stop to an earlier stop's delay", async () => {
+        const delaySeconds = 120
+        fakeGtfs.setTripUpdates([
+          {
+            trip: {
+              tripId: "CITY1",
+              startDate: "20080104",
+              scheduleRelationship:
+                GtfsRt.TripDescriptor.ScheduleRelationship.SCHEDULED,
+            },
+            stopTimeUpdate: [
+              { stopSequence: 0, arrival: { delay: delaySeconds } },
+              {
+                stopSequence: 2,
+                scheduleRelationship:
+                  GtfsRt.TripUpdate.StopTimeUpdate.ScheduleRelationship.NO_DATA,
+              },
+            ],
+            vehicle: { id: "53967", label: "1594" },
+          },
+        ])
+
+        const trips = await getTripSchedule("testfeed:CITY,testfeed:NADAV")
+        const trip = trips.find((trip) => trip.tripId === "testfeed:CITY1")
+        expect(trip).toBeDefined()
+
+        expect(trip!.arrivalTime).toBe(1199455920 + delaySeconds)
+        expect(trip!.departureTime).toBe(1199456040 + delaySeconds)
+        expect(trip!.isRealtime).toBe(true)
+        expect(trip!.vehicle).toBe("1594")
+      })
+
+      // Only a delay survives the fallback synthesis, so an earlier stop with
+      // absolute times but no delay contributed nothing while still reading as
+      // realtime.
+      test("is not realtime when the only earlier stop has no delay", async () => {
+        fakeGtfs.setTripUpdates([
+          {
+            trip: {
+              tripId: "CITY1",
+              startDate: "20080104",
+              scheduleRelationship:
+                GtfsRt.TripDescriptor.ScheduleRelationship.SCHEDULED,
+            },
+            stopTimeUpdate: [
+              { stopSequence: 0, arrival: { time: 1199455800 } },
+            ],
+            vehicle: { id: "53967", label: "1594" },
+          },
+        ])
+
+        const trips = await getTripSchedule("testfeed:CITY,testfeed:NADAV")
+        const trip = trips.find((trip) => trip.tripId === "testfeed:CITY1")
+        expect(trip).toBeDefined()
+
+        expect(trip!.arrivalTime).toBe(1199455920)
+        expect(trip!.isRealtime).toBe(false)
+        expect(trip!.vehicle).toBeNull()
+      })
+
+      test("uses the vehicle id when no label is set", async () => {
+        fakeGtfs.setTripUpdates([
+          {
+            trip: {
+              tripId: "CITY1",
+              startDate: "20080104",
+              scheduleRelationship:
+                GtfsRt.TripDescriptor.ScheduleRelationship.SCHEDULED,
+            },
+            stopTimeUpdate: [{ stopSequence: 2, arrival: { delay: 60 } }],
+            vehicle: { id: "0053" },
+          },
+        ])
+
+        const trips = await getTripSchedule("testfeed:CITY,testfeed:NADAV")
+        const trip = trips.find((trip) => trip.tripId === "testfeed:CITY1")
+        expect(trip).toBeDefined()
+
+        expect(trip!.isRealtime).toBe(true)
+        expect(trip!.vehicle).toBe("0053")
+      })
+
       test("with fallback delay when multiple previous stops exist", async () => {
         fakeGtfs.setTripUpdates([
           {
