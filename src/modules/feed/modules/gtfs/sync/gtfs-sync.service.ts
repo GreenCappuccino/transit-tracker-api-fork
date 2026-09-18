@@ -124,10 +124,7 @@ export class GtfsSyncService {
 
     try {
       const resourceMetadata =
-        await this.webResourceService.getResourceMetadata(
-          url,
-          this.config.static.headers,
-        )
+        await this.webResourceService.getResourceMetadata(this.config.static)
 
       this.logger.info(
         {
@@ -138,7 +135,10 @@ export class GtfsSyncService {
         "GTFS zip metadata",
       )
 
-      if (!opts?.force) {
+      // A transport that could answer a probe has already told us everything we
+      // need, so an unchanged feed costs nothing further. One that could not
+      // has to be downloaded before it can be compared -- see below.
+      if (!opts?.force && resourceMetadata.probed) {
         const isNewer = await this.isResourceNewer(resourceMetadata)
         if (!isNewer) {
           this.logger.info("Feed is not newer; import not required")
@@ -156,10 +156,26 @@ export class GtfsSyncService {
 
       this.logger.info(`Downloading and unzipping GTFS feed to ${zipDirectory}`)
 
-      await this.zipFileService.downloadAndExtract(
-        this.config.static,
-        zipDirectory,
-      )
+      const { hash: downloadedHash } =
+        await this.zipFileService.downloadAndExtract(
+          this.config.static,
+          zipDirectory,
+        )
+
+      // The probe could not judge freshness ahead of time, so judge it now that
+      // the bytes are in hand. Downloading an unchanged archive is cheap next to
+      // re-importing it.
+      if (!opts?.force && !resourceMetadata.probed) {
+        const isNewer = await this.isResourceNewer({
+          ...resourceMetadata,
+          hash: downloadedHash,
+        })
+
+        if (!isNewer) {
+          this.logger.info("Feed contents are unchanged; import not required")
+          return
+        }
+      }
 
       await this.createPartitions()
 
@@ -178,7 +194,7 @@ export class GtfsSyncService {
         {
           etag: resourceMetadata.etag,
           lastModified: resourceMetadata.lastModified,
-          hash: resourceMetadata.hash,
+          hash: resourceMetadata.hash ?? downloadedHash,
           feedCode: this.feedCode,
         },
         this.db,

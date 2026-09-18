@@ -48,6 +48,14 @@ describe("GTFS E2E test", () => {
       "utf-8",
     )
 
+    // Exercises the systemd LoadCredential path: the njtfeed config names its
+    // credential files relatively, and they are resolved against this.
+    process.env.CREDENTIALS_DIRECTORY = path.join(
+      __dirname,
+      "fixtures",
+      "njt-credentials",
+    )
+
     if (process.platform === "win32") {
       process.env.PRE_IMPORT_HOOK = `type nul > "${preImportHookPath}"`
       process.env.POST_IMPORT_HOOK = `type nul > "${postImportHookPath}"`
@@ -114,7 +122,7 @@ describe("GTFS E2E test", () => {
       .expect("Content-Type", /json/)
       .expect(200)
 
-    expect(response.body).toHaveLength(4)
+    expect(response.body).toHaveLength(5)
 
     const feed = response.body.find((f: any) => f.code === "testfeed")
 
@@ -152,7 +160,8 @@ describe("GTFS E2E test", () => {
       .expect(200)
 
     expect(response.body).toMatchSnapshot()
-    expect(response.body).toHaveLength(2)
+    // Two feeds serve this fixture: testfeed and njtfeed.
+    expect(response.body).toHaveLength(4)
   })
 
   test("GET /stops/:id/routes", async () => {
@@ -889,6 +898,96 @@ describe("GTFS E2E test", () => {
         expect(trip!.vehicle).toBeNull()
         expect(trip!.isRealtime).toBe(false)
       })
+    })
+  })
+
+  // These run last on purpose: the final test drives a login failure, which
+  // arms a multi-minute backoff on the shared NJ TRANSIT account.
+  describe("NJ TRANSIT authenticated feed", () => {
+    beforeEach(() => {
+      mockDateTimeNow.mockReturnValue(new Date("2008-01-04T13:30:00Z"))
+    })
+
+    afterEach(() => {
+      mockDateTimeNow.mockReset()
+      fakeGtfs.setTripUpdates([])
+    })
+
+    async function getNjtSchedule() {
+      const response = await request(app.getHttpServer())
+        .get("/schedule/njtfeed:STBA,njtfeed:STAGECOACH")
+        .expect("Content-Type", /json/)
+        .expect(200)
+
+      return response.body.trips as TripDto[]
+    }
+
+    // The headline assertion: a whole import plus realtime traffic costs one
+    // login, not one per request.
+    test("authenticates once for the import and all realtime requests", async () => {
+      await getNjtSchedule()
+      await getNjtSchedule()
+      await getNjtSchedule()
+
+      expect(fakeGtfs.getNjtTokenCallCount()).toBe(1)
+    })
+
+    test("imported the feed through the authenticated API", async () => {
+      const response = await request(app.getHttpServer())
+        .get("/feeds")
+        .expect(200)
+
+      const njt = response.body.find((feed: any) => feed.code === "njtfeed")
+      expect(njt).toBeDefined()
+      expect(njt.lastSyncedAt).not.toBeNull()
+    })
+
+    test("applies realtime updates fetched with a token", async () => {
+      fakeGtfs.setTripUpdates([
+        {
+          trip: {
+            tripId: "STBA",
+            startDate: "20080104",
+            scheduleRelationship:
+              GtfsRt.TripDescriptor.ScheduleRelationship.SCHEDULED,
+          },
+          stopTimeUpdate: [
+            {
+              stopId: "STAGECOACH",
+              arrival: { time: 1199455200 },
+            },
+          ],
+          vehicle: { id: "5097", label: "411" },
+        },
+      ])
+
+      const trips = await getNjtSchedule()
+      const trip = trips.find((t) => t.tripId === "njtfeed:STBA")
+
+      expect(trip).toBeDefined()
+      expect(trip!.isRealtime).toBe(true)
+      expect(trip!.arrivalTime).toBe(1199455200)
+    })
+
+    test("re-authenticates exactly once when the token is rejected", async () => {
+      const before = fakeGtfs.getNjtTokenCallCount()
+      fakeGtfs.rotateNjtToken()
+
+      await getNjtSchedule()
+
+      expect(fakeGtfs.getNjtTokenCallCount()).toBe(before + 1)
+    })
+
+    test("degrades to the static schedule when logins are refused", async () => {
+      fakeGtfs.setNjtTokenLimit(0)
+      fakeGtfs.rotateNjtToken()
+
+      const trips = await getNjtSchedule()
+
+      // Realtime is lost, but the schedule still renders: GtfsRealtimeService
+      // settles each fetch independently and falls back to static data.
+      expect(trips.length).toBeGreaterThan(0)
+      expect(trips.every((trip) => trip.isRealtime === false)).toBe(true)
     })
   })
 })

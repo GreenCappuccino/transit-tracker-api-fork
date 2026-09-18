@@ -12,6 +12,7 @@ import type { FeedContext } from "../../interfaces/feed-provider.interface"
 import { FeedCacheService } from "../feed-cache/feed-cache.service"
 import type { FetchConfig, GtfsConfig } from "./config"
 import { decodeTripUpdatesOnly } from "./decode-trip-updates"
+import { FetchService } from "./fetch/fetch.service"
 import { UpstreamHttpError } from "./gtfs.errors"
 import { IGetScheduleForRouteAtStopResult } from "./queries/list-schedule-for-route.queries"
 
@@ -34,6 +35,7 @@ export class GtfsRealtimeService {
   constructor(
     @Inject(FEED_CONTEXT) { feedCode, config }: FeedContext<GtfsConfig>,
     private readonly cache: FeedCacheService,
+    private readonly fetchService: FetchService,
     metricService: MetricService,
     private readonly logger: PinoLogger,
   ) {
@@ -107,12 +109,11 @@ export class GtfsRealtimeService {
           )
 
           try {
-            const resp = await fetch(config.url, {
+            const resp = await this.fetchService.fetch(config, {
               signal: controller.signal,
               headers: {
                 "User-Agent":
                   "Transit Tracker API (https://transit-tracker.eastsideurbanism.org/)",
-                ...(config.headers ?? {}),
               },
             })
 

@@ -1,25 +1,41 @@
 import { Injectable } from "@nestjs/common"
 import crypto from "crypto"
+import { FetchConfig } from "../config"
+import { FetchService } from "../fetch/fetch.service"
 
 export interface WebResourceMetadata {
   hash: string | null
   lastModified: Date | null
   etag: string | null
+
+  /**
+   * Whether freshness could be determined *before* downloading the resource.
+   *
+   * False when the transport cannot answer a metadata probe at all, in which
+   * case the caller has to download first and compare content hashes after.
+   */
+  probed: boolean
 }
 
 @Injectable()
 export class WebResourceService {
+  constructor(private readonly fetchService: FetchService) {}
+
   async getResourceMetadata(
-    url: string,
-    headers?: Record<string, string>,
+    resource: FetchConfig,
   ): Promise<WebResourceMetadata> {
+    if (!this.fetchService.capabilities(resource).validators) {
+      // This transport cannot answer a metadata probe -- an API that is POST
+      // only has nothing to send a HEAD to, and no validators to return.
+      // Probing anyway would download the whole archive just to hash it, and
+      // then the caller would download it a second time to extract it.
+      return { hash: null, lastModified: null, etag: null, probed: false }
+    }
+
     let hash: string | null = null
 
     let response: Response
-    response = await fetch(url, {
-      method: "HEAD",
-      headers: headers,
-    })
+    response = await this.fetchService.fetch(resource, { method: "HEAD" })
 
     let lastModified: Date | null = null
     try {
@@ -36,10 +52,7 @@ export class WebResourceService {
     const failedHeadRequest = !response.ok && response.status < 500
     if (failedHeadRequest || (lastModified === null && etag === null)) {
       await new Promise((resolve) => setTimeout(resolve, 1000))
-      response = await fetch(url, {
-        method: "GET",
-        headers: headers,
-      })
+      response = await this.fetchService.fetch(resource, { method: "GET" })
 
       if (response.ok) {
         const hashStream = crypto.createHash("sha256")
@@ -62,6 +75,7 @@ export class WebResourceService {
       hash,
       lastModified,
       etag,
+      probed: true,
     }
   }
 }
