@@ -7,6 +7,14 @@ export interface WebResourceMetadata {
   hash: string | null
   lastModified: Date | null
   etag: string | null
+
+  /**
+   * Whether freshness could be determined *before* downloading the resource.
+   *
+   * False when the transport cannot answer a metadata probe at all, in which
+   * case the caller has to download first and compare content hashes after.
+   */
+  probed: boolean
 }
 
 @Injectable()
@@ -16,6 +24,14 @@ export class WebResourceService {
   async getResourceMetadata(
     resource: FetchConfig,
   ): Promise<WebResourceMetadata> {
+    if (!this.fetchService.capabilities(resource).validators) {
+      // This transport cannot answer a metadata probe -- an API that is POST
+      // only has nothing to send a HEAD to, and no validators to return.
+      // Probing anyway would download the whole archive just to hash it, and
+      // then the caller would download it a second time to extract it.
+      return { hash: null, lastModified: null, etag: null, probed: false }
+    }
+
     let hash: string | null = null
 
     let response: Response
@@ -59,6 +75,7 @@ export class WebResourceService {
       hash,
       lastModified,
       etag,
+      probed: true,
     }
   }
 }

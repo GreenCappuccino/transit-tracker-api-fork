@@ -35,3 +35,24 @@ feeds:
         url: http://127.0.0.1:3123/feeds/gtfs-feed-2.zip
         headers:
           Authorization: fake-auth
+  # A feed behind NJ TRANSIT's token-authenticated, POST-only API. The anchor
+  # below is the ergonomics this shape is meant to have: credentials declared
+  # once and referenced from both the static and realtime entries.
+  njtfeed:
+    name: NJT Style Feed
+    description: Token-authenticated POST feed
+    gtfs:
+      static:
+        url: http://127.0.0.1:3123/njt/getGTFS
+        auth: &njtauth
+          provider: njtransit
+          api: rail
+          baseUrl: http://127.0.0.1:3123/njt
+          # Relative, so they resolve through CREDENTIALS_DIRECTORY exactly as
+          # they would under systemd LoadCredential.
+          usernameFile: username.txt
+          passwordFile: password.txt
+          dailyTokenBudget: 3
+      rtTripUpdates:
+        url: http://127.0.0.1:3123/njt/getTripUpdates
+        auth: *njtauth

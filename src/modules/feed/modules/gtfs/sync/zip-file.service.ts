@@ -1,8 +1,9 @@
 import { Injectable, Logger } from "@nestjs/common"
+import crypto from "crypto"
 import fs from "fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { Readable } from "node:stream"
+import { PassThrough, Readable } from "node:stream"
 import * as unzipper from "unzipper"
 import { FetchConfig } from "../config"
 import { FetchService } from "../fetch/fetch.service"
@@ -14,10 +15,19 @@ export class ZipFileService {
 
   constructor(private readonly fetchService: FetchService) {}
 
+  /**
+   * Downloads the archive and extracts it, returning the SHA-256 of the bytes
+   * transferred.
+   *
+   * The hash is computed from the same stream that feeds the extractor, so it
+   * costs one download rather than two. Callers whose transport cannot answer a
+   * metadata probe use it to decide, after the fact, whether the contents
+   * actually changed.
+   */
   async downloadAndExtract(
     resource: FetchConfig,
     destinationPath: string,
-  ): Promise<void> {
+  ): Promise<{ hash: string }> {
     const url = new URL(resource.url)
     if (url.hash !== "") {
       const subZipFileName = decodeURIComponent(url.hash.substring(1))
@@ -30,10 +40,12 @@ export class ZipFileService {
           .substring(2, 15)}`,
       )
 
-      await this.downloadAndExtract(
+      // The outer archive's hash is the identity of what we fetched, which is
+      // what freshness should be judged on.
+      const { hash } = await this.downloadAndExtract(
         {
+          ...resource,
           url: url.toString(),
-          headers: resource.headers,
         },
         parentZipTempPath,
       )
@@ -47,7 +59,7 @@ export class ZipFileService {
 
       await fs.rm(parentZipTempPath, { recursive: true, force: true })
 
-      return
+      return { hash }
     }
 
     const response = await this.fetchService.fetch(
@@ -71,24 +83,38 @@ export class ZipFileService {
     const nodeStream = Readable.fromWeb(response.body as any)
     const extractor = unzipper.Extract({ path: destinationPath })
 
-    await new Promise<void>((resolve, reject) => {
-      nodeStream.pipe(extractor)
+    const hasher = crypto.createHash("sha256")
+    const tap = new PassThrough()
+    tap.on("data", (chunk) => hasher.update(chunk))
 
+    await new Promise<void>((resolve, reject) => {
       let error: any = null
-      extractor.on("error", (err) => {
+      const fail = (err: any) => {
+        if (error) return
         error = err
         extractor.end()
         reject(err)
-      })
+      }
+
+      // Every stage needs an error handler. Without one on the source, a
+      // connection reset mid-download leaves this promise pending forever
+      // rather than failing the sync.
+      nodeStream.on("error", fail)
+      tap.on("error", fail)
+      extractor.on("error", fail)
 
       extractor.on("close", () => {
         if (!error) {
           resolve()
         }
       })
+
+      nodeStream.pipe(tap).pipe(extractor)
     })
 
     await this.flattenDirectory(destinationPath)
+
+    return { hash: hasher.digest("hex") }
   }
 
   private async flattenDirectory(directory: string): Promise<void> {

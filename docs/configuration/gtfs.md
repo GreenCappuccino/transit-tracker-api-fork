@@ -38,6 +38,8 @@ docker compose run --rm api "node ./dist/cli sync"
 
 Static feeds will not be imported unless they have changed since last import. This is determined using the `Last-Modified` or `ETag` HTTP headers, or if neither are provided by the server, a hash of the ZIP file. You can force a re-import of all feeds by adding the `--force`/`-f` flag.
 
+Feeds behind an [authenticated API](#authenticated-feeds) whose transport cannot answer a metadata request are handled differently: there is nothing to send a `HEAD` to, so the archive is downloaded on every sync and its contents hashed afterwards. The feed is still only *imported* when that hash changes, which is the expensive part.
+
 ```shell
 docker compose run --rm api "node ./dist/cli sync -f"
 ```
@@ -137,6 +139,104 @@ feeds:
         - url: https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-si
           routeIds: ["SI"]
 ```
+
+## Authenticated Feeds
+
+Some agencies put their GTFS behind a login rather than a plain URL. Any `static` or `rtTripUpdates` entry can carry an `auth` block describing how to authenticate, discriminated on `provider`:
+
+```yaml
+gtfs:
+  static:
+    url: https://example.com/getGTFS
+    auth:
+      provider: someprovider
+      # provider-specific fields
+```
+
+This is separate from `headers`, which remains the right tool when a feed only needs a static API key or bearer token.
+
+### NJ TRANSIT
+
+NJ TRANSIT's GTFS and GTFS-RT are served by an API that requires a session token. Register for credentials at [the NJ TRANSIT developer portal](https://developer.njtransit.com/registration); rail and bus are **separate APIs with separate accounts**, so a deployment carrying both needs two sets of credentials.
+
+```yaml
+feeds:
+  njtrail:
+    name: NJ TRANSIT Rail
+    description: New Jersey, USA
+    gtfs:
+      static:
+        url: https://raildata.njtransit.com/api/GTFSRT/getGTFS
+        auth: &njtrail
+          provider: njtransit
+          api: rail
+          username: YOUR_USERNAME
+          password: YOUR_PASSWORD
+      rtTripUpdates:
+        url: https://raildata.njtransit.com/api/GTFSRT/getTripUpdates
+        auth: *njtrail
+
+  njtbus:
+    name: NJ TRANSIT Bus
+    description: New Jersey, USA
+    gtfs:
+      static:
+        url: https://pcsdata.njtransit.com/api/GTFSG2/getGTFS
+        auth: &njtbus
+          provider: njtransit
+          api: bus
+          username: YOUR_USERNAME
+          password: YOUR_PASSWORD
+      rtTripUpdates:
+        url: https://pcsdata.njtransit.com/api/GTFSG2/getTripUpdates
+        auth: *njtbus
+```
+
+The YAML anchor (`&njtrail` / `*njtrail`) is the intended way to avoid repeating credentials across the static and realtime entries.
+
+> **The static feed must come from this API too.** The `trip_id`s in NJ TRANSIT's public ZIP downloads have **no overlap** with the ones in its realtime feed, so pairing `rtTripUpdates` with a public ZIP matches nothing and every trip silently reports `isRealtime: false`. See [the feed library](./feed-library.md#nj-transit-rail).
+
+#### The daily login limit
+
+NJ TRANSIT permits **10 logins per account per day**, resetting at midnight Eastern. Exceeding it locks the account out of *every* endpoint for the rest of the day, so this is treated as a hard constraint rather than a rate limit:
+
+- The token is cached in Redis, shared across instances and preserved across restarts. In steady state a deployment spends **one login per account per day**.
+- `dailyTokenBudget` (default `6`) caps logins below NJ TRANSIT's own limit, leaving headroom for debugging against the same account. Once reached, the feed reports an upstream error instead of logging in again. Realtime degrades to the static schedule; it does not take the feed down.
+- `tokenMaxAge` (default `20h`) controls proactive re-authentication.
+
+Setting `REDIS_URL` is what makes the budget hold across restarts and instances. Without it the count is per-process only, and a restart loop can exhaust the account.
+
+#### Credentials from files
+
+Both `username` and `password` accept a `File` variant naming a path read at login time, which keeps secrets out of the config:
+
+```yaml
+auth:
+  provider: njtransit
+  api: rail
+  usernameFile: njt-rail-username
+  passwordFile: njt-rail-password
+```
+
+Relative paths resolve against `$CREDENTIALS_DIRECTORY`, so they pair directly with systemd credentials:
+
+```ini
+[Service]
+LoadCredential=njt-rail-username:/etc/transit-tracker/njt-rail-username
+LoadCredential=njt-rail-password:/etc/transit-tracker/njt-rail-password
+```
+
+Absolute paths are used as-is, which is what you want for Docker or Compose secrets:
+
+```yaml
+auth:
+  provider: njtransit
+  api: bus
+  usernameFile: /run/secrets/njt_bus_username
+  passwordFile: /run/secrets/njt_bus_password
+```
+
+Files are read fresh on each login, so rotating a secret takes effect without a restart. Trailing whitespace is stripped.
 
 ## Quirks
 

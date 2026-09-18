@@ -309,6 +309,34 @@ feeds:
 
 New Jersey, USA
 
+> **Requires an account for realtime.** [Register at NJ Transit's developer portal](https://developer.njtransit.com/registration). Rail and bus are separate APIs with separate accounts. See [authenticated feeds](./gtfs.md#nj-transit) for the daily login limit and how to supply credentials from files.
+
+```yaml
+feeds:
+  njtbus:
+    name: NJ Transit Buses
+    description: New Jersey, USA
+    gtfs:
+      static:
+        url: https://pcsdata.njtransit.com/api/GTFSG2/getGTFS
+        auth: &njtbus
+          provider: njtransit
+          api: bus
+          username: YOUR_USERNAME
+          password: YOUR_PASSWORD
+      rtTripUpdates:
+        url: https://pcsdata.njtransit.com/api/GTFSG2/getTripUpdates
+        auth: *njtbus
+```
+
+### Schedule only
+
+A public ZIP is available without an account.
+
+> **Realtime requires the authenticated API.** The `trip_id`s in this public ZIP have **0% overlap** with those in NJ Transit's GTFS-RT feed, so pairing it with `rtTripUpdates` matches nothing and every trip silently reports `isRealtime: false`. The static feed served by NJ Transit's own API matches its realtime feed at 99.1% (rail) and 100% (bus).
+>
+> Use the authenticated configuration below if you want realtime. This snippet is schedule-only.
+
 ```yaml
 feeds:
   njtbus:
@@ -322,6 +350,34 @@ feeds:
 ## NJ Transit Rail
 
 New Jersey, USA
+
+> **Requires an account for realtime.** [Register at NJ Transit's developer portal](https://developer.njtransit.com/registration). Rail and bus are separate APIs with separate accounts. See [authenticated feeds](./gtfs.md#nj-transit) for the daily login limit and how to supply credentials from files.
+
+```yaml
+feeds:
+  njtrail:
+    name: NJ Transit Rail
+    description: New Jersey, USA
+    gtfs:
+      static:
+        url: https://raildata.njtransit.com/api/GTFSRT/getGTFS
+        auth: &njtrail
+          provider: njtransit
+          api: rail
+          username: YOUR_USERNAME
+          password: YOUR_PASSWORD
+      rtTripUpdates:
+        url: https://raildata.njtransit.com/api/GTFSRT/getTripUpdates
+        auth: *njtrail
+```
+
+### Schedule only
+
+A public ZIP is available without an account.
+
+> **Realtime requires the authenticated API.** The `trip_id`s in this public ZIP have **0% overlap** with those in NJ Transit's GTFS-RT feed, so pairing it with `rtTripUpdates` matches nothing and every trip silently reports `isRealtime: false`. The static feed served by NJ Transit's own API matches its realtime feed at 99.1% (rail) and 100% (bus).
+>
+> Use the authenticated configuration below if you want realtime. This snippet is schedule-only.
 
 ```yaml
 feeds:
