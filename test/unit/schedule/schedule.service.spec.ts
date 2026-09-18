@@ -446,6 +446,51 @@ describe("ScheduleService", () => {
       expect(scheduleUpdates[1]!.trips.length).toBe(2)
     })
 
+    // A propagated delay floors at zero, so it commonly lands on exactly the
+    // scheduled time. When the trip then goes genuinely live and happens to be
+    // on time, every other compared field matches -- only the source moves.
+    it("publishes an update when only the prediction source changes", async () => {
+      // Arrange
+      const scheduleOptions: ScheduleOptions = {
+        feedCode: "testFeed",
+        routes: [{ routeId: "route1", stopId: "stop1", offset: 0 }],
+        limit: 5,
+      }
+
+      const inferred = makeMockTripStops("route1", "stop1", 1).map((trip) => ({
+        ...trip,
+        isRealtime: true,
+        predictionSource: "block" as const,
+      }))
+
+      const published = inferred.map((trip) => ({
+        ...trip,
+        predictionSource: "trip" as const,
+      }))
+
+      // Act
+      mockFeedProvider.getUpcomingTripsForRoutesAtStops.mockResolvedValue(
+        inferred,
+      )
+
+      const finish = collectValues(
+        scheduleService.subscribeToSchedule(scheduleOptions),
+      )
+
+      mockFeedProvider.getUpcomingTripsForRoutesAtStops.mockResolvedValue(
+        published,
+      )
+
+      await vi.advanceTimersByTimeAsync(45000)
+
+      const scheduleUpdates = finish()
+
+      // Assert
+      expect(scheduleUpdates.length).toBe(2)
+      expect(scheduleUpdates[0]!.trips[0]!.predictionSource).toBe("block")
+      expect(scheduleUpdates[1]!.trips[0]!.predictionSource).toBe("trip")
+    })
+
     it("does not publish an update if the schedule hasn't changed", async () => {
       // Arrange
       const scheduleOptions: ScheduleOptions = {

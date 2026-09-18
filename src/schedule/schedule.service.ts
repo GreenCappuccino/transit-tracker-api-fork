@@ -252,7 +252,12 @@ export class ScheduleService {
         pt[i].tripId !== ct[i].tripId ||
         pt[i].arrivalTime !== ct[i].arrivalTime ||
         pt[i].departureTime !== ct[i].departureTime ||
-        pt[i].isRealtime !== ct[i].isRealtime
+        pt[i].isRealtime !== ct[i].isRealtime ||
+        // Block-inferred delays floor at zero, so a propagated prediction often
+        // lands on exactly the scheduled time. Without this, the transition to a
+        // genuine on-time prediction compares equal and is never pushed, leaving
+        // a client that renders the source showing the weaker one indefinitely.
+        pt[i].predictionSource !== ct[i].predictionSource
       )
         return false
     }
