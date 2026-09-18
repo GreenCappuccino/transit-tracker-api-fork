@@ -38,7 +38,9 @@ docker compose run --rm api "node ./dist/cli sync"
 
 Static feeds will not be imported unless they have changed since last import. This is determined using the `Last-Modified` or `ETag` HTTP headers, or if neither are provided by the server, a hash of the ZIP file. You can force a re-import of all feeds by adding the `--force`/`-f` flag.
 
-Feeds behind an [authenticated API](#authenticated-feeds) whose transport cannot answer a metadata request are handled differently: there is nothing to send a `HEAD` to, so the archive is downloaded on every sync and its contents hashed afterwards. The feed is still only *imported* when that hash changes, which is the expensive part.
+Feeds behind an [authenticated API](#authenticated-feeds) whose transport cannot answer a metadata request are handled differently: there is nothing to send a `HEAD` to, so the archive is downloaded on every sync and hashed afterwards. The feed is still only *imported* when that hash changes, which is the expensive part.
+
+> Note that this compares the archive's bytes, not the data inside it. An agency that regenerates its ZIP per request — NJ TRANSIT's rail feed does, producing a different archive each time from identical data — will re-import on every sync regardless. That is cheap for a small feed and wasteful for a large one, so prefer an infrequent `--feed` sync for those.
 
 ```shell
 docker compose run --rm api "node ./dist/cli sync -f"
