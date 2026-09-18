@@ -11,6 +11,7 @@ import type {
   RouteAtStop,
   Stop,
   StopRoute,
+  StopRouteDirection,
   TripStop,
 } from "src/modules/feed/interfaces/feed-provider.interface"
 import { DeepReadonly } from "ts-essentials"
@@ -159,10 +160,10 @@ export class OneBusAwayService implements FeedProvider {
     )
   }
 
-  private async getPossibleHeadsignsForRouteAtStop(
+  private async getDirectionsForRouteAtStop(
     routeId: string,
     stopId: string,
-  ): Promise<DeepReadonly<string[]>> {
+  ): Promise<DeepReadonly<StopRouteDirection[]>> {
     return this.cache.cached(
       `headsigns-${routeId}-${stopId}`,
       async () => {
@@ -176,11 +177,16 @@ export class OneBusAwayService implements FeedProvider {
         }
 
         const stopGroups = (stopGrouping as any).stopGroups as StopGroup[] // bad API typings grumble grumble
-        const names = stopGroups
-          .filter((sg) => sg.stopIds.includes(stopId))
-          .flatMap((sg) => sg.name.names)
 
-        return names
+        // A stop group *is* a direction: its id matches the directionId that
+        // references.trips carries, so the grouping is kept rather than being
+        // flattened away.
+        return stopGroups
+          .filter((sg) => sg.stopIds.includes(stopId))
+          .map((sg) => ({
+            directionId: sg.id ?? null,
+            headsigns: sg.name.names,
+          }))
       },
       ms("24h"),
     )
@@ -215,7 +221,7 @@ export class OneBusAwayService implements FeedProvider {
           stop.data.references.routes
             .filter((route) => !this.isAgencyExcluded(route.agencyId))
             .map(async (route) => {
-              const headsigns = await this.getPossibleHeadsignsForRouteAtStop(
+              const directions = await this.getDirectionsForRouteAtStop(
                 route.id,
                 stopId,
               )
@@ -226,7 +232,8 @@ export class OneBusAwayService implements FeedProvider {
                 routeId: route.id,
                 name: route.shortName ?? "Unnamed Route",
                 color: color?.trim() !== "" ? color : null,
-                headsigns,
+                headsigns: [...new Set(directions.flatMap((d) => d.headsigns))],
+                directions,
               }
             }),
         )

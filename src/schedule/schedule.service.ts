@@ -80,8 +80,17 @@ export class ScheduleService {
     const sortKey = sortByDeparture ? "departureTime" : "arrivalTime"
     let trips: ScheduleTrip[] = upcomingTrips
       .map((trip) => {
+        // Direction is part of the pair's identity: two subscriptions to the
+        // same route and stop in opposite directions may carry different
+        // offsets, and matching on route and stop alone would take whichever
+        // came first.
         const offset = routes.find(
-          (r) => r.routeId === trip.routeId && r.stopId === trip.stopId,
+          (r) =>
+            r.routeId === trip.routeId &&
+            r.stopId === trip.stopId &&
+            (r.directionId === undefined ||
+              r.directionId === null ||
+              r.directionId === trip.directionId),
         )?.offset
 
         return {
@@ -140,16 +149,43 @@ export class ScheduleService {
     const routeStopPairs = routeStopPairsRaw
       .split(";")
       .map((pair) => pair.split(",").map((part) => part.trim()))
-      .map(([routeId, stopId, offset]) => ({
-        routeId,
-        stopId,
-        offset: parseInt(offset ?? "0"),
-      }))
+      .map(([routeIdWithDirection, stopId, offset]) => {
+        // An optional `@<directionId>` suffix narrows the pair to one direction
+        // of travel. Omitting it keeps the historical behaviour of returning
+        // both, so existing clients are unaffected.
+        //
+        // `@` rather than a fourth comma-separated field, because position 3 is
+        // already the offset; and rather than `:`, which route ids themselves
+        // contain (global ids are `feedCode:localId`, and some providers use
+        // colons within the local id too).
+        const separatorIndex = routeIdWithDirection?.lastIndexOf("@") ?? -1
+        const routeId =
+          separatorIndex === -1
+            ? routeIdWithDirection
+            : routeIdWithDirection.slice(0, separatorIndex)
+        const directionId =
+          separatorIndex === -1
+            ? undefined
+            : routeIdWithDirection.slice(separatorIndex + 1)
+
+        return {
+          routeId,
+          stopId,
+          directionId,
+          offset: parseInt(offset ?? "0"),
+        }
+      })
 
     for (const pair of routeStopPairs) {
       if (!pair.routeId || !pair.stopId) {
         throw new BadRequestException(
-          "Invalid route-stop pair; must be in the format routeId,stopId[,offset]",
+          "Invalid route-stop pair; must be in the format routeId[@directionId],stopId[,offset]",
+        )
+      }
+
+      if (pair.directionId === "") {
+        throw new BadRequestException(
+          'Invalid direction; must not be empty when "@" is given',
         )
       }
 

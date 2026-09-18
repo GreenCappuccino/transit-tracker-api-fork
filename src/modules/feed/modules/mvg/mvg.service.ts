@@ -90,12 +90,19 @@ export class MvgService implements FeedProvider {
           }
         }
 
-        return Array.from(routeMap.values()).map((route) => ({
-          routeId: route.routeId,
-          name: route.name,
-          color: route.color,
-          headsigns: Array.from(route.headsigns),
-        }))
+        return Array.from(routeMap.values()).map((route) => {
+          const headsigns = Array.from(route.headsigns)
+
+          return {
+            routeId: route.routeId,
+            name: route.name,
+            color: route.color,
+            headsigns,
+            // MVG departures carry a destination but no direction field, so
+            // trips report a null directionId and there is nothing to split on.
+            directions: [{ directionId: null, headsigns }],
+          }
+        })
       },
       ms("1h"),
     )

@@ -164,6 +164,26 @@ describe("GTFS E2E test", () => {
     expect(response.body).toHaveLength(4)
   })
 
+  // One stop id serving both directions is the normal case for rail-type stops,
+  // where the undirected headsign list mixes inbound and outbound destinations.
+  test("GET /stops/:id/routes exposes directions separately", async () => {
+    const response = await request(app.getHttpServer())
+      .get("/stops/testfeed:AMV/routes")
+      .expect(200)
+
+    const route = response.body[0]
+
+    // The union is preserved for clients that predate `directions`.
+    expect(route.headsigns).toEqual(
+      expect.arrayContaining(["to Airport", "to Amargosa Valley"]),
+    )
+
+    expect(route.directions).toEqual([
+      { directionId: "0", headsigns: ["to Amargosa Valley"] },
+      { directionId: "1", headsigns: ["to Airport"] },
+    ])
+  })
+
   test("GET /stops/:id/routes", async () => {
     const response = await request(app.getHttpServer())
       .get("/stops/testfeed:AMV/routes")
@@ -194,6 +214,48 @@ describe("GTFS E2E test", () => {
       expect(response.body).toHaveProperty("trips")
       return response.body.trips as TripDto[]
     }
+
+    describe("direction selection", () => {
+      async function headsignsFor(pair: string) {
+        const response = await request(app.getHttpServer())
+          .get(`/schedule/${pair}`)
+          .expect(200)
+
+        return [
+          ...new Set((response.body.trips as TripDto[]).map((t) => t.headsign)),
+        ].sort()
+      }
+
+      it("returns both directions when none is given", async () => {
+        await expect(
+          headsignsFor("testfeed:AAMV,testfeed:BEATTY_AIRPORT"),
+        ).resolves.toEqual(["to Airport", "to Amargosa Valley"])
+      })
+
+      it("returns only the requested direction", async () => {
+        await expect(
+          headsignsFor("testfeed:AAMV@1,testfeed:BEATTY_AIRPORT"),
+        ).resolves.toEqual(["to Airport"])
+
+        await expect(
+          headsignsFor("testfeed:AAMV@0,testfeed:BEATTY_AIRPORT"),
+        ).resolves.toEqual(["to Amargosa Valley"])
+      })
+
+      it("returns nothing for a direction that does not run here", async () => {
+        const response = await request(app.getHttpServer())
+          .get("/schedule/testfeed:AAMV@7,testfeed:BEATTY_AIRPORT")
+          .expect(200)
+
+        expect(response.body.trips).toHaveLength(0)
+      })
+
+      it("rejects an empty direction", async () => {
+        await request(app.getHttpServer())
+          .get("/schedule/testfeed:AAMV@,testfeed:BEATTY_AIRPORT")
+          .expect(400)
+      })
+    })
 
     test("with static schedule", async () => {
       const trips = await getTripSchedule()

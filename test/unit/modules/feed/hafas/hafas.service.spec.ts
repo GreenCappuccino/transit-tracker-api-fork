@@ -424,12 +424,16 @@ describe("HafasService", () => {
           name: "S8",
           color: null,
           headsigns: ["Flughafen", "Herrsching"],
+          directions: [
+            { directionId: null, headsigns: ["Flughafen", "Herrsching"] },
+          ],
         },
         {
           routeId: "u5",
           name: "Unknown Route Name",
           color: null,
           headsigns: [],
+          directions: [{ directionId: null, headsigns: [] }],
         },
       ])
     })

@@ -4,6 +4,7 @@ SELECT
   routes.route_short_name,
   routes.route_long_name,
   routes.route_color,
+  trips.direction_id,
   JSON_AGG(DISTINCT CASE 
     WHEN coalesce(TRIM(stop_times.stop_headsign), '') = '' THEN trips.trip_headsign
     ELSE stop_times.stop_headsign
@@ -16,5 +17,6 @@ GROUP BY
   routes.route_id,
   routes.route_short_name,
   routes.route_long_name,
-  routes.route_color
-ORDER BY routes.route_short_name;
+  routes.route_color,
+  trips.direction_id
+ORDER BY routes.route_short_name, trips.direction_id;

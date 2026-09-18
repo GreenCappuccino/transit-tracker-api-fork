@@ -86,6 +86,7 @@ export class AllFeedsService implements FeedProvider {
         acc[feedCode].push({
           stopId,
           routeId,
+          directionId: routeStop.directionId,
         })
 
         return acc

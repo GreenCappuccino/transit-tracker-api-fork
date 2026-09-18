@@ -550,5 +550,47 @@ describe("ScheduleService", () => {
       // Act & Assert
       expect(() => scheduleService.parseRouteStopPairs(input)).toThrow()
     })
+
+    it("should parse an optional direction suffix", () => {
+      // Arrange
+      const input = "route1@0,stop1;route2@1,stop2,30"
+
+      // Act
+      const result = scheduleService.parseRouteStopPairs(input)
+
+      // Assert
+      expect(result).toEqual([
+        { routeId: "route1", stopId: "stop1", directionId: "0", offset: 0 },
+        { routeId: "route2", stopId: "stop2", directionId: "1", offset: 30 },
+      ])
+    })
+
+    it("should leave the direction undefined when no suffix is given", () => {
+      // Act
+      const [pair] = scheduleService.parseRouteStopPairs("route1,stop1")
+
+      // Assert
+      expect(pair.directionId).toBeUndefined()
+    })
+
+    // Global ids are `feedCode:localId` and some providers use colons inside the
+    // local id, so the direction has to split on the last "@" rather than a colon.
+    it("should only split on the final @ of a namespaced route id", () => {
+      // Act
+      const [pair] = scheduleService.parseRouteStopPairs(
+        "mvg:swm:02U06@1,mvg:de:09162:70",
+      )
+
+      // Assert
+      expect(pair.routeId).toBe("mvg:swm:02U06")
+      expect(pair.directionId).toBe("1")
+      expect(pair.stopId).toBe("mvg:de:09162:70")
+    })
+
+    it("should throw an error when the direction is empty", () => {
+      expect(() =>
+        scheduleService.parseRouteStopPairs("route1@,stop1"),
+      ).toThrow()
+    })
   })
 })

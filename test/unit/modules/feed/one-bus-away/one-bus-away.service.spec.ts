@@ -142,24 +142,43 @@ describe("OneBusAwayService", () => {
       const routes = await oneBusAwayService.getRoutesForStop(stopId)
 
       // Assert
+      // OneBusAway stop groups are directions: the group id matches the
+      // directionId that references.trips carries.
       expect(routes).toEqual([
         {
           routeId: "1_102753",
           name: "222",
           color: "FDB71A",
           headsigns: ["Redmond Technology Station Downtown Redmond Station"],
+          directions: [
+            {
+              directionId: "0",
+              headsigns: [
+                "Redmond Technology Station Downtown Redmond Station",
+              ],
+            },
+          ],
         },
         {
           routeId: "1_102752",
           name: "223",
           color: "FDB71A",
           headsigns: ["Eastgate P&R Lake Hills"],
+          directions: [
+            { directionId: "0", headsigns: ["Eastgate P&R Lake Hills"] },
+          ],
         },
         {
           routeId: "1_102704",
           name: "250",
           color: "FDB71A",
           headsigns: ["Bellevue Transit Center Bear Creek P&R"],
+          directions: [
+            {
+              directionId: "1",
+              headsigns: ["Bellevue Transit Center Bear Creek P&R"],
+            },
+          ],
         },
       ])
     })

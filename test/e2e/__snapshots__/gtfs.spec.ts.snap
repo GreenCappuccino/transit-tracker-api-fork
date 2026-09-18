@@ -338,9 +338,23 @@ exports[`GTFS E2E test > GET /stops/:id/routes 1`] = `
 [
   {
     "color": null,
+    "directions": [
+      {
+        "directionId": "0",
+        "headsigns": [
+          "to Amargosa Valley",
+        ],
+      },
+      {
+        "directionId": "1",
+        "headsigns": [
+          "to Airport",
+        ],
+      },
+    ],
     "headsigns": [
-      "to Airport",
       "to Amargosa Valley",
+      "to Airport",
     ],
     "name": "50",
     "routeId": "testfeed:AAMV",

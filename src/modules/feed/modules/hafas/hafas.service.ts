@@ -193,12 +193,19 @@ export class HafasService implements FeedProvider {
         return []
       }
 
-      return stop.lines!.map((line) => ({
-        routeId: line.id!,
-        name: line.name ?? "Unknown Route Name",
-        color: null,
-        headsigns: (line.directions as string[]) ?? [],
-      }))
+      return stop.lines!.map((line) => {
+        const headsigns = (line.directions as string[]) ?? []
+
+        return {
+          routeId: line.id!,
+          name: line.name ?? "Unknown Route Name",
+          color: null,
+          headsigns,
+          // HAFAS exposes destination names but no stable direction identifier,
+          // so there is nothing a client could select against.
+          directions: [{ directionId: null, headsigns }],
+        }
+      })
     })
   }
 

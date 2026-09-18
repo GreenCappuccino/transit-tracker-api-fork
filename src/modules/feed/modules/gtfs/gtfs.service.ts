@@ -278,22 +278,55 @@ export class GtfsService implements FeedProvider {
           this.db,
         )
 
-        return routes.map<StopRoute>((route) => ({
-          routeId: route.route_id,
-          color: route.route_color?.replaceAll("#", "").trim() || null,
-          name:
-            (!route.route_short_name || route.route_short_name.trim() === ""
-              ? route.route_long_name
-              : route.route_short_name) ?? "Unnamed Route",
-          headsigns: (route.headsigns as string[])
+        // The query returns one row per route *and direction*, so collapse them
+        // back into one entry per route carrying both the undirected headsign
+        // list and the per-direction breakdown.
+        const byRoute = new Map<string, StopRoute>()
+
+        for (const route of routes) {
+          const headsigns = (route.headsigns as string[])
             .filter((headsign) => headsign && headsign.trim() !== "")
             .map((headsign) =>
               this.removeRouteNameFromHeadsign(
                 route.route_short_name,
                 headsign,
               ),
-            ),
-        }))
+            )
+
+          const existing = byRoute.get(route.route_id)
+          if (existing) {
+            byRoute.set(route.route_id, {
+              ...existing,
+              headsigns: [...new Set([...existing.headsigns, ...headsigns])],
+              directions: [
+                ...existing.directions,
+                {
+                  directionId: route.direction_id?.toString() ?? null,
+                  headsigns,
+                },
+              ],
+            })
+            continue
+          }
+
+          byRoute.set(route.route_id, {
+            routeId: route.route_id,
+            color: route.route_color?.replaceAll("#", "").trim() || null,
+            name:
+              (!route.route_short_name || route.route_short_name.trim() === ""
+                ? route.route_long_name
+                : route.route_short_name) ?? "Unnamed Route",
+            headsigns,
+            directions: [
+              {
+                directionId: route.direction_id?.toString() ?? null,
+                headsigns,
+              },
+            ],
+          })
+        }
+
+        return [...byRoute.values()]
       },
       ms("24h"),
     )
@@ -326,9 +359,24 @@ export class GtfsService implements FeedProvider {
     for (const scheduleDate of scheduleDates) {
       const staticTrips = (
         await Promise.all(
-          routes.map(({ routeId, stopId }) =>
-            this.getScheduleForRouteAtStop(routeId, stopId, scheduleDate),
-          ),
+          routes.map(async ({ routeId, stopId, directionId }) => {
+            const trips = await this.getScheduleForRouteAtStop(
+              routeId,
+              stopId,
+              scheduleDate,
+            )
+
+            // Filtered here rather than in the query so that directed and
+            // undirected requests share one cache entry. The query applies no
+            // row limit — it returns the whole service day for this route and
+            // stop — so filtering afterwards discards nothing a limit would
+            // have kept.
+            if (directionId === undefined || directionId === null) {
+              return trips
+            }
+
+            return trips.filter((trip) => trip.direction_id === directionId)
+          }),
         )
       ).flat()
 
