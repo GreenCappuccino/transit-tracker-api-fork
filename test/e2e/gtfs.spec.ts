@@ -685,6 +685,38 @@ describe("GTFS E2E test", () => {
         )
       })
 
+      // An overnight trip's GTFS service date is the day it *started*, not the
+      // calendar date its post-midnight stop falls on. A producer sending the
+      // spec-correct start_date previously failed to match, because the service
+      // derived one by adding the stop time to the service day.
+      test("matches an overnight trip by its service date", async () => {
+        mockDateTimeNow.mockReturnValue(new Date("2008-01-05T08:25:00.000Z"))
+
+        fakeGtfs.setTripUpdates([
+          {
+            trip: {
+              tripId: "STBA_OVERNIGHT",
+              // The service day it departed on, though it arrives on the 5th.
+              startDate: "20080104",
+              scheduleRelationship:
+                GtfsRt.TripDescriptor.ScheduleRelationship.SCHEDULED,
+            },
+            stopTimeUpdate: [
+              { stopId: "STAGECOACH", arrival: { time: 1199521830 } },
+            ],
+          },
+        ])
+
+        const trips = await getTripSchedule()
+        const overnightTrips = trips.filter(
+          (trip) => trip.tripId === "testfeed:STBA_OVERNIGHT",
+        )
+
+        expect(overnightTrips.length).toBeGreaterThan(0)
+        expect(overnightTrips[0].arrivalTime).toBe(1199521830)
+        expect(overnightTrips[0].isRealtime).toBe(true)
+      })
+
       test("with update to overnight trip (crossing midnight)", async () => {
         mockDateTimeNow.mockReturnValue(new Date("2008-01-05T08:25:00.000Z"))
 

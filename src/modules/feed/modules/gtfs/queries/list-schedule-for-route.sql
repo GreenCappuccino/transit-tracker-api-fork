@@ -86,7 +86,11 @@ SELECT
     END AS stop_headsign,
     TIMEZONE(agency_timezone.tz, current_day.today + st.arrival_time) as "arrival_time!",
     TIMEZONE(agency_timezone.tz, current_day.today + st.departure_time) as "departure_time!",
-    to_char(current_day.today + st.arrival_time, 'YYYYMMDD') as start_date
+    -- The GTFS service date, which is what a producer puts in a trip
+    -- descriptor's start_date. Deliberately not `today + arrival_time`: stop
+    -- times may exceed 24:00:00, and adding one would roll an overnight trip's
+    -- start_date onto the following calendar day and stop it matching.
+    to_char(current_day.today, 'YYYYMMDD') as start_date
 FROM "stop_times" st
 JOIN route_trips rt ON st.trip_id = rt.trip_id
 JOIN "routes" r ON rt.route_id = r.route_id
