@@ -99,6 +99,8 @@ describe("AllFeedsService", () => {
           departureTime: new Date(),
           vehicle: null,
           isRealtime: true,
+          directionId: null,
+          predictionSource: "trip",
         },
       ]
 
@@ -115,6 +117,8 @@ describe("AllFeedsService", () => {
           departureTime: new Date(),
           vehicle: null,
           isRealtime: false,
+          directionId: null,
+          predictionSource: null,
         },
       ]
 

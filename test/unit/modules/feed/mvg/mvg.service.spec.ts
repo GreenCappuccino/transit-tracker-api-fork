@@ -289,6 +289,7 @@ describe("MvgService", () => {
           departureTime: new Date(NOW + ms("7m")),
           vehicle: null,
           isRealtime: true,
+          predictionSource: "trip",
         },
       ])
     })

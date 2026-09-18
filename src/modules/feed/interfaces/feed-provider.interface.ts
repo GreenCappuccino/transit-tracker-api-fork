@@ -28,6 +28,15 @@ export interface TripStop {
   departureTime: Date
   vehicle: string | null
   isRealtime: boolean
+
+  /**
+   * Where a realtime prediction came from, or null when there is none.
+   *
+   * `trip` means the producer published an update for this trip. `block` means
+   * it was inferred from the preceding trip on the same block, which is a
+   * weaker signal -- see the `propagateBlockDelays` quirk.
+   */
+  predictionSource: "trip" | "block" | null
 }
 
 export interface Stop {

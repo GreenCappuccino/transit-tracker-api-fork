@@ -106,6 +106,19 @@ export class TripDto {
     example: true,
   })
   isRealtime!: boolean
+
+  @ApiProperty({
+    required: true,
+    nullable: true,
+    enum: ["trip", "block"],
+    description:
+      "Where a real-time prediction came from, or null when there is none. " +
+      "`trip` means the agency published an update for this trip. `block` means it was " +
+      "inferred from the preceding trip on the same block — the same vehicle earlier in " +
+      "its rotation — which is a weaker signal.",
+    example: "trip",
+  })
+  predictionSource!: "trip" | "block" | null
 }
 
 export class ScheduleDto {

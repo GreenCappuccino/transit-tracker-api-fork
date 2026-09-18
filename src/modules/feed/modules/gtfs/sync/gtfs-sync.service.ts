@@ -565,6 +565,7 @@ export class GtfsSyncService {
       trip_id: row.trip_id,
       trip_headsign: row.trip_headsign,
       direction_id: row.direction_id,
+      block_id: row.block_id,
     }))
   }
 

@@ -135,6 +135,18 @@ export const GtfsConfigSchema = z.strictObject({
   quirks: z
     .object({
       fuzzyMatchTripUpdates: z.boolean().optional(),
+
+      /**
+       * Lets a trip with no realtime data of its own inherit a delay from the
+       * preceding trip on the same block -- the same vehicle earlier in its
+       * rotation.
+       *
+       * Off by default because it is inference rather than measurement: the
+       * vehicle may be swapped, pulled or short-turned, and block semantics
+       * vary between agencies. Predictions produced this way are reported with
+       * a `predictionSource` of `block` so they stay distinguishable.
+       */
+      propagateBlockDelays: z.boolean().optional(),
     })
     .optional(),
   static: FetchConfigOrUrlSchema,

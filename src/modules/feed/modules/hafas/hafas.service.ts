@@ -161,6 +161,7 @@ export class HafasService implements FeedProvider {
             departureTime: new Date(when),
             vehicle: null, // Hafas does not appear to provide vehicle IDs
             isRealtime,
+            predictionSource: isRealtime ? ("trip" as const) : null,
           })
         }
       }

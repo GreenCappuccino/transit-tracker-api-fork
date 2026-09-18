@@ -122,7 +122,7 @@ describe("GTFS E2E test", () => {
       .expect("Content-Type", /json/)
       .expect(200)
 
-    expect(response.body).toHaveLength(5)
+    expect(response.body).toHaveLength(6)
 
     const feed = response.body.find((f: any) => f.code === "testfeed")
 
@@ -160,8 +160,8 @@ describe("GTFS E2E test", () => {
       .expect(200)
 
     expect(response.body).toMatchSnapshot()
-    // Two feeds serve this fixture: testfeed and njtfeed.
-    expect(response.body).toHaveLength(4)
+    // Three feeds serve this fixture: testfeed, njtfeed and blockfeed.
+    expect(response.body).toHaveLength(6)
   })
 
   // One stop id serving both directions is the normal case for rail-type stops,
@@ -995,6 +995,92 @@ describe("GTFS E2E test", () => {
 
         expect(trip!.isRealtime).toBe(true)
         expect(trip!.vehicle).toBe("0053")
+      })
+
+      // NJ TRANSIT, like many producers, publishes updates only for trips that
+      // have left their origin, so an upcoming departure has no prediction even
+      // when the vehicle that will operate it is already being tracked on its
+      // previous trip. The fixture block runs BFC2 (11:00-12:00) then AB2
+      // (12:05-12:15), a five minute layover.
+      describe("block delay propagation", () => {
+        const AB2_SCHEDULED_ARRIVAL = 1199477700 // 12:15 America/Los_Angeles
+
+        function delayBfc2(delaySeconds: number) {
+          fakeGtfs.setTripUpdates([
+            {
+              trip: {
+                tripId: "BFC2",
+                startDate: "20080104",
+                scheduleRelationship:
+                  GtfsRt.TripDescriptor.ScheduleRelationship.SCHEDULED,
+              },
+              stopTimeUpdate: [
+                {
+                  stopSequence: 2,
+                  arrival: { delay: delaySeconds },
+                  departure: { delay: delaySeconds },
+                },
+              ],
+              vehicle: { id: "9001", label: "block-runner" },
+            },
+          ])
+        }
+
+        async function ab2For(feedCode: string) {
+          const response = await request(app.getHttpServer())
+            .get(`/schedule/${feedCode}:AB,${feedCode}:BEATTY_AIRPORT`)
+            .expect(200)
+
+          return (response.body.trips as TripDto[]).find(
+            (trip) => trip.tripId === `${feedCode}:AB2`,
+          )
+        }
+
+        it("carries a delay forward, less the scheduled layover", async () => {
+          // Ten minutes late into the terminal, five minutes of layover.
+          delayBfc2(600)
+
+          const trip = await ab2For("blockfeed")
+
+          expect(trip).toBeDefined()
+          expect(trip!.isRealtime).toBe(true)
+          expect(trip!.predictionSource).toBe("block")
+          expect(trip!.arrivalTime).toBe(AB2_SCHEDULED_ARRIVAL + 300)
+          // The same physical vehicle, so its identifier carries over.
+          expect(trip!.vehicle).toBe("block-runner")
+        })
+
+        it("predicts on time when the layover absorbs the delay", async () => {
+          // Four minutes late, five minutes of layover: it leaves on time, and
+          // that is a prediction rather than an absence of one.
+          delayBfc2(240)
+
+          const trip = await ab2For("blockfeed")
+
+          expect(trip!.isRealtime).toBe(true)
+          expect(trip!.predictionSource).toBe("block")
+          expect(trip!.arrivalTime).toBe(AB2_SCHEDULED_ARRIVAL)
+        })
+
+        it("does nothing for a feed that has not opted in", async () => {
+          delayBfc2(600)
+
+          const trip = await ab2For("testfeed")
+
+          expect(trip).toBeDefined()
+          expect(trip!.isRealtime).toBe(false)
+          expect(trip!.predictionSource).toBeNull()
+          expect(trip!.arrivalTime).toBe(AB2_SCHEDULED_ARRIVAL)
+        })
+
+        it("does nothing when the preceding trip has no realtime", async () => {
+          fakeGtfs.setTripUpdates([])
+
+          const trip = await ab2For("blockfeed")
+
+          expect(trip!.isRealtime).toBe(false)
+          expect(trip!.predictionSource).toBeNull()
+        })
       })
 
       test("with fallback delay when multiple previous stops exist", async () => {

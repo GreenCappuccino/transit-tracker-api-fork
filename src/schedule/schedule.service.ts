@@ -35,6 +35,7 @@ export interface ScheduleTrip {
   departureTime: number
   vehicle: string | null
   isRealtime: boolean
+  predictionSource: "trip" | "block" | null
 }
 
 export interface ScheduleUpdate {

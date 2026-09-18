@@ -219,6 +219,7 @@ export class MvgService implements FeedProvider {
           departureTime: departureTime,
           vehicle: null, // MVG does not appear to provide vehicle numbers
           isRealtime: departure.realtime,
+          predictionSource: departure.realtime ? ("trip" as const) : null,
         })
       }
     }

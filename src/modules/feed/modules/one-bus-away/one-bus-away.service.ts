@@ -558,6 +558,7 @@ export class OneBusAwayService implements FeedProvider {
           departureTime,
           vehicle,
           isRealtime,
+          predictionSource: isRealtime ? ("trip" as const) : null,
         }
 
         if (existing) {

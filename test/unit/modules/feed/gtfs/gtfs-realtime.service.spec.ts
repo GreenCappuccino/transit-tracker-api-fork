@@ -15,6 +15,7 @@ function makeTrip(
 ): IGetScheduleForRouteAtStopResult {
   return {
     arrival_time: SCHEDULED_ARRIVAL,
+    block_id: null,
     departure_time: SCHEDULED_DEPARTURE,
     direction_id: "0",
     route_color: null,
@@ -253,6 +254,82 @@ describe("GtfsRealtimeService", () => {
 
         expect(vehicle).toBeNull()
       })
+    })
+  })
+
+  describe("resolveBlockDelay", () => {
+    const index = (stopTimeUpdate: any[], extra: any = {}) =>
+      service.buildTripUpdateIndex([
+        { trip: { tripId: "PREV" }, stopTimeUpdate, ...extra },
+      ])
+
+    it("subtracts the scheduled layover from the carried delay", () => {
+      const result = service.resolveBlockDelay(
+        "PREV",
+        300,
+        index([{ stopSequence: 2, arrival: { delay: 600 } }]),
+      )
+
+      expect(result?.delay).toBe(300)
+    })
+
+    // Layover is recovery time: a delay smaller than it means an on-time
+    // departure, which is a prediction rather than an absence of one.
+    it("floors at zero rather than predicting an early departure", () => {
+      const result = service.resolveBlockDelay(
+        "PREV",
+        900,
+        index([{ stopSequence: 2, arrival: { delay: 600 } }]),
+      )
+
+      expect(result?.delay).toBe(0)
+    })
+
+    it("uses the furthest point along the previous trip", () => {
+      const result = service.resolveBlockDelay(
+        "PREV",
+        0,
+        index([
+          { stopSequence: 1, arrival: { delay: 60 } },
+          { stopSequence: 5, arrival: { delay: 420 } },
+          { stopSequence: 3, arrival: { delay: 120 } },
+        ]),
+      )
+
+      expect(result?.delay).toBe(420)
+    })
+
+    // Past an hour the vehicle has enough slack that its current state says
+    // nothing, and claiming "on time" would be asserting on no evidence.
+    it("refuses to propagate across a long layover", () => {
+      const spans = index([{ stopSequence: 2, arrival: { delay: 600 } }])
+
+      expect(service.resolveBlockDelay("PREV", 60 * 60, spans)).not.toBeNull()
+      expect(service.resolveBlockDelay("PREV", 60 * 60 + 1, spans)).toBeNull()
+    })
+
+    it("carries the vehicle across, since it is the same one", () => {
+      const result = service.resolveBlockDelay(
+        "PREV",
+        0,
+        index([{ stopSequence: 2, arrival: { delay: 60 } }], {
+          vehicle: { id: "9001", label: "block-runner" },
+        }),
+      )
+
+      expect(result?.vehicle).toBe("block-runner")
+    })
+
+    it("returns null when the previous trip is unknown or has no delay", () => {
+      expect(service.resolveBlockDelay("MISSING", 0, index([]))).toBeNull()
+
+      expect(
+        service.resolveBlockDelay(
+          "PREV",
+          0,
+          index([{ stopSequence: 2, arrival: { time: 1767355200 } }]),
+        ),
+      ).toBeNull()
     })
   })
 

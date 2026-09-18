@@ -51,7 +51,7 @@ final_active_services AS (
 ),
 route_trips AS (
     -- Fetch trips for the specific route and active services
-    SELECT t.trip_id, t.trip_headsign, t.direction_id, r.route_short_name, r.route_long_name, r.route_id
+    SELECT t.trip_id, t.trip_headsign, t.direction_id, t.block_id, r.route_short_name, r.route_long_name, r.route_id
     FROM "trips" t
     JOIN "routes" r ON t.route_id = r.route_id
     WHERE t.route_id = :routeId!
@@ -90,7 +90,8 @@ SELECT
     -- descriptor's start_date. Deliberately not `today + arrival_time`: stop
     -- times may exceed 24:00:00, and adding one would roll an overnight trip's
     -- start_date onto the following calendar day and stop it matching.
-    to_char(current_day.today, 'YYYYMMDD') as start_date
+    to_char(current_day.today, 'YYYYMMDD') as start_date,
+    rt.block_id
 FROM "stop_times" st
 JOIN route_trips rt ON st.trip_id = rt.trip_id
 JOIN "routes" r ON rt.route_id = r.route_id

@@ -498,6 +498,7 @@ describe("ScheduleService", () => {
       routeColor: "#FFFFFF",
       stopName: `Stop ${stopId}`,
       headsign: `Headsign ${i}`,
+      predictionSource: null,
       directionId,
       arrivalTime: new Date(Date.now() + (i + 1) * 60000),
       departureTime: new Date(Date.now() + (i + 2) * 60000),

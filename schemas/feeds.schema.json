@@ -66,6 +66,11 @@
                       "type": "boolean",
                       "description": "If enabled, GTFS-RT trip updates will be matched using a substring of `trip_id` rather than an exact match.",
                       "default": false
+                    },
+                    "propagateBlockDelays": {
+                      "type": "boolean",
+                      "description": "If enabled, a trip with no realtime data of its own may inherit a delay from the preceding trip on the same block - the same vehicle earlier in its rotation. The carried delay is reduced by the scheduled layover, and such predictions are reported with a predictionSource of \"block\". Requires block_id in the feed.",
+                      "default": false
                     }
                   }
                 },

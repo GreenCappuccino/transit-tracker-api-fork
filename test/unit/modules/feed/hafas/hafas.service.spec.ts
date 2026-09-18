@@ -159,6 +159,7 @@ describe("HafasService", () => {
           departureTime: new Date(inMinutes(5)),
           vehicle: null,
           isRealtime: true,
+          predictionSource: "trip",
         },
       ])
     })

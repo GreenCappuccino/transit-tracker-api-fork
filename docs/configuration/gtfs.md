@@ -249,3 +249,23 @@ Even though GTFS is a standard, some agencies will have slight variations in the
 By default, the API will only apply GTFS-RT Trip Updates to trips that exactly match a trip ID in the static GTFS feed. However, some agencies (like NYC MTA) will use different trip IDs in their GTFS-RT feeds that don't exactly match the static feed. This is usually due to operational reasons.
 
 If `fuzzyMatchTripUpdates` is enabled, the API will instead match Trip Updates based on a partial match of the trip ID. For example, if a Trip Update has a trip ID of `12345`, it will match a static GTFS trip with an ID of `12345-ABCD`.
+
+### `propagateBlockDelays`
+
+Many agencies publish Trip Updates only for trips that have already left their origin. An upcoming departure therefore has no prediction of its own, even when the vehicle that will operate it is already being tracked on its previous trip.
+
+With `propagateBlockDelays` enabled, a trip with no realtime data may inherit a delay from the trip immediately before it on the same `block_id` — the same vehicle earlier in its rotation. The carried delay is reduced by the scheduled layover, because that is recovery time: a bus twelve minutes late into a terminal with a fifteen minute layover still leaves on time.
+
+```yaml
+gtfs:
+  quirks:
+    propagateBlockDelays: true
+```
+
+This is inference rather than measurement, which is why it is off by default:
+
+- Vehicles get swapped, pulled from service, or short-turned, and none of that is visible in the feed.
+- `block_id` semantics vary between agencies. Some use it for a true vehicle rotation, others for something looser.
+- Nothing is propagated across a layover longer than an hour, since by then the vehicle has enough slack that its current delay says nothing useful.
+
+Predictions produced this way report `"predictionSource": "block"` rather than `"trip"`, so they stay distinguishable from ones the agency actually published. Requires `block_id` in the feed's `trips.txt`; feeds without it are unaffected.
