@@ -117,9 +117,14 @@ export const FetchConfigSchema = z.strictObject({
   auth: AuthConfigSchema.optional(),
 })
 
+export type FetchConfig = z.infer<typeof FetchConfigSchema>
+
 export const FetchConfigOrUrlSchema = z.union([
   FetchConfigSchema,
-  z.string().transform((url) => ({ url, headers: {} })),
+  // Annotated so both branches infer as FetchConfig. Without it the union
+  // widens to include a branch with no `auth` key, and every consumer reading
+  // `config.auth` off a `static` entry has to narrow first.
+  z.string().transform((url): FetchConfig => ({ url, headers: {} })),
 ])
 
 export const RouteIdFilteredFetchConfigSchema = FetchConfigSchema.extend({
@@ -141,5 +146,4 @@ export const GtfsConfigSchema = z.strictObject({
 export type CredentialFields = z.infer<typeof CredentialFieldsSchema>
 export type NjTransitAuthConfig = z.infer<typeof NjTransitAuthConfigSchema>
 export type AuthConfig = z.infer<typeof AuthConfigSchema>
-export type FetchConfig = z.infer<typeof FetchConfigSchema>
 export type GtfsConfig = z.infer<typeof GtfsConfigSchema>

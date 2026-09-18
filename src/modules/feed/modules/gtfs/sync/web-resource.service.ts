@@ -1,5 +1,7 @@
 import { Injectable } from "@nestjs/common"
 import crypto from "crypto"
+import { FetchConfig } from "../config"
+import { FetchService } from "../fetch/fetch.service"
 
 export interface WebResourceMetadata {
   hash: string | null
@@ -9,17 +11,15 @@ export interface WebResourceMetadata {
 
 @Injectable()
 export class WebResourceService {
+  constructor(private readonly fetchService: FetchService) {}
+
   async getResourceMetadata(
-    url: string,
-    headers?: Record<string, string>,
+    resource: FetchConfig,
   ): Promise<WebResourceMetadata> {
     let hash: string | null = null
 
     let response: Response
-    response = await fetch(url, {
-      method: "HEAD",
-      headers: headers,
-    })
+    response = await this.fetchService.fetch(resource, { method: "HEAD" })
 
     let lastModified: Date | null = null
     try {
@@ -36,10 +36,7 @@ export class WebResourceService {
     const failedHeadRequest = !response.ok && response.status < 500
     if (failedHeadRequest || (lastModified === null && etag === null)) {
       await new Promise((resolve) => setTimeout(resolve, 1000))
-      response = await fetch(url, {
-        method: "GET",
-        headers: headers,
-      })
+      response = await this.fetchService.fetch(resource, { method: "GET" })
 
       if (response.ok) {
         const hashStream = crypto.createHash("sha256")

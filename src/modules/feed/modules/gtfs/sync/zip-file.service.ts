@@ -5,11 +5,14 @@ import path from "node:path"
 import { Readable } from "node:stream"
 import * as unzipper from "unzipper"
 import { FetchConfig } from "../config"
+import { FetchService } from "../fetch/fetch.service"
 import { EmptyResponseBodyError, UpstreamHttpError } from "../gtfs.errors"
 
 @Injectable()
 export class ZipFileService {
   private readonly logger = new Logger(ZipFileService.name)
+
+  constructor(private readonly fetchService: FetchService) {}
 
   async downloadAndExtract(
     resource: FetchConfig,
@@ -47,10 +50,10 @@ export class ZipFileService {
       return
     }
 
-    const response = await fetch(url, {
-      method: "GET",
-      headers: resource.headers,
-    })
+    const response = await this.fetchService.fetch(
+      { ...resource, url: url.toString() },
+      { method: "GET" },
+    )
 
     if (!response.ok) {
       throw new UpstreamHttpError(

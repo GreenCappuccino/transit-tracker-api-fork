@@ -124,10 +124,7 @@ export class GtfsSyncService {
 
     try {
       const resourceMetadata =
-        await this.webResourceService.getResourceMetadata(
-          url,
-          this.config.static.headers,
-        )
+        await this.webResourceService.getResourceMetadata(this.config.static)
 
       this.logger.info(
         {
