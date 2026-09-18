@@ -6,6 +6,9 @@ import { FeedCacheModule } from "../feed-cache/feed-cache.module"
 import { PG_POOL } from "./const"
 import { AUTH_STRATEGIES } from "./fetch/auth/auth-strategy.interface"
 import { AuthStrategyRegistry } from "./fetch/auth/auth-strategy.registry"
+import { NjTransitTokenStore } from "./fetch/auth/njtransit/njtransit-token.store"
+import { NjTransitClient } from "./fetch/auth/njtransit/njtransit.client"
+import { NjTransitAuthStrategy } from "./fetch/auth/njtransit/njtransit.strategy"
 import { CredentialsService } from "./fetch/credentials.service"
 import { FetchService } from "./fetch/fetch.service"
 import { GtfsDbService } from "./gtfs-db.service"
@@ -23,11 +26,15 @@ import { ZipFileService } from "./sync/zip-file.service"
     FetchService,
     AuthStrategyRegistry,
     CredentialsService,
+    NjTransitClient,
+    NjTransitTokenStore,
+    NjTransitAuthStrategy,
     {
       // Every registered authentication strategy. New providers are added here
       // and to the zod union in ./config.ts; nothing else has to change.
       provide: AUTH_STRATEGIES,
-      useFactory: () => [],
+      useFactory: (njtransit: NjTransitAuthStrategy) => [njtransit],
+      inject: [NjTransitAuthStrategy],
     },
     ZipFileService,
     WebResourceService,
