@@ -102,13 +102,16 @@ export class FeedCacheService {
       return result
     }
 
-    const promise = getValue()
+    // The cleanup has to hang off the promise rather than a `finally` block
+    // around the return. In an async function the block runs as soon as the
+    // return value is registered -- before the promise settles -- so the entry
+    // was removed almost immediately and concurrent callers all missed it.
+    const promise = getValue().finally(() => {
+      this.pendingCache.delete(key)
+    })
+
     this.pendingCache.set(key, promise)
 
-    try {
-      return promise as Promise<DeepReadonly<T>>
-    } finally {
-      this.pendingCache.delete(key)
-    }
+    return promise as Promise<DeepReadonly<T>>
   }
 }

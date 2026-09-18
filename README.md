@@ -97,6 +97,14 @@ There is also a WebSocket interface that can be used to subscribe to real-time s
 }
 ```
 
+Each pair is `routeId,stopId` with an optional `,offset`. The route may carry an
+optional `@directionId` suffix — `st:1_100113@1,st:1_71971` — which restricts the
+pair to one direction of travel. Omit it to receive both, which is the default.
+
+This matters most at rail-type stops, where a single stop id serves both
+platforms and an undirected pair interleaves inbound and outbound departures.
+The available directions for a stop are listed by `GET /stops/:stopId/routes`.
+
 The following parameters are available to tweak the schedule data:
 
 - `limit`: The maximum number of trips to return in a single update.
@@ -117,6 +125,7 @@ Once subscribed, you will receive updates to your desired schedule in the follow
         "routeName": "221",
         "stopName": "NE Redmond Way & Bear Creek Pkwy",
         "headsign": "Eastgate P&R",
+        "directionId": "1",
         "arrivalTime": 1737346216,
         "departureTime": 1737346216,
         "vehicle": "7323",

@@ -56,3 +56,19 @@ feeds:
       rtTripUpdates:
         url: http://127.0.0.1:3123/njt/getTripUpdates
         auth: *njtauth
+  # Same fixture as testfeed, but opted into block delay propagation so the
+  # behaviour can be exercised without changing any other feed's expectations.
+  blockfeed:
+    name: Block Propagation Feed
+    description: A feed that infers delays across vehicle blocks
+    gtfs:
+      quirks:
+        propagateBlockDelays: true
+      static:
+        url: http://127.0.0.1:3123/feeds/gtfs-feed.zip
+        headers:
+          Authorization: fake-auth
+      rtTripUpdates:
+        url: http://127.0.0.1:3123/gtfs-rt/trip-updates
+        headers:
+          Authorization: fake-auth

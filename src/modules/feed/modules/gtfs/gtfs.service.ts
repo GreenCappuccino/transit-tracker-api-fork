@@ -1,4 +1,5 @@
 import { Inject } from "@nestjs/common"
+import crypto from "crypto"
 import { BBox } from "geojson"
 import { transit_realtime as GtfsRt } from "gtfs-realtime-bindings"
 import ms from "ms"
@@ -26,6 +27,7 @@ import { FeedNeverSyncedError } from "./gtfs.errors"
 import { getFeedInfo } from "./queries/get-feed-info.queries"
 import { getStopBounds } from "./queries/get-stop-bounds.queries"
 import { getStop } from "./queries/get-stop.queries"
+import { listBlockTripSpans } from "./queries/list-block-trip-spans.queries"
 import { listRoutesForStop } from "./queries/list-routes-for-stop.queries"
 import {
   getScheduleForRouteAtStop,
@@ -278,25 +280,129 @@ export class GtfsService implements FeedProvider {
           this.db,
         )
 
-        return routes.map<StopRoute>((route) => ({
-          routeId: route.route_id,
-          color: route.route_color?.replaceAll("#", "").trim() || null,
-          name:
-            (!route.route_short_name || route.route_short_name.trim() === ""
-              ? route.route_long_name
-              : route.route_short_name) ?? "Unnamed Route",
-          headsigns: (route.headsigns as string[])
+        // The query returns one row per route *and direction*, so collapse them
+        // back into one entry per route carrying both the undirected headsign
+        // list and the per-direction breakdown.
+        const byRoute = new Map<string, StopRoute>()
+
+        for (const route of routes) {
+          const headsigns = (route.headsigns as string[])
             .filter((headsign) => headsign && headsign.trim() !== "")
             .map((headsign) =>
               this.removeRouteNameFromHeadsign(
                 route.route_short_name,
                 headsign,
               ),
-            ),
-        }))
+            )
+
+          const existing = byRoute.get(route.route_id)
+          if (existing) {
+            byRoute.set(route.route_id, {
+              ...existing,
+              headsigns: [...new Set([...existing.headsigns, ...headsigns])],
+              directions: [
+                ...existing.directions,
+                {
+                  directionId: route.direction_id?.toString() ?? null,
+                  headsigns,
+                },
+              ],
+            })
+            continue
+          }
+
+          byRoute.set(route.route_id, {
+            routeId: route.route_id,
+            color: route.route_color?.replaceAll("#", "").trim() || null,
+            name:
+              (!route.route_short_name || route.route_short_name.trim() === ""
+                ? route.route_long_name
+                : route.route_short_name) ?? "Unnamed Route",
+            headsigns,
+            directions: [
+              {
+                directionId: route.direction_id?.toString() ?? null,
+                headsigns,
+              },
+            ],
+          })
+        }
+
+        return [...byRoute.values()]
       },
       ms("24h"),
     )
+  }
+
+  /**
+   * For each trip we are about to report on, the trip the same vehicle runs
+   * immediately before it, and how much recovery time sits between them.
+   *
+   * Empty unless the feed opts in, so a feed that does not use this pays
+   * nothing: no query is issued and no cache entry is taken.
+   */
+  private async getBlockPredecessors(
+    staticTrips: ReadonlyArray<DeepReadonly<IGetScheduleForRouteAtStopResult>>,
+  ): Promise<Map<string, { tripId: string; layoverSeconds: number }>> {
+    const predecessors = new Map<
+      string,
+      { tripId: string; layoverSeconds: number }
+    >()
+
+    if (!this.config.quirks?.propagateBlockDelays) {
+      return predecessors
+    }
+
+    const serviceDate = staticTrips.find((trip) => trip.start_date)?.start_date
+    const blockIds = [
+      ...new Set(
+        staticTrips
+          .map((trip) => trip.block_id)
+          .filter((blockId): blockId is string => !!blockId?.trim()),
+      ),
+    ].sort()
+
+    if (!serviceDate || blockIds.length === 0) {
+      return predecessors
+    }
+
+    // Keyed on the block set rather than the whole feed, so the payload stays
+    // proportional to what was asked for. The set is derived from the schedule,
+    // which is itself cached, so the key is stable between requests.
+    const blockKey = crypto
+      .createHash("sha1")
+      .update(blockIds.join(","))
+      .digest("hex")
+      .slice(0, 16)
+
+    const spans = await this.cache.cached(
+      `blockSpans-${serviceDate}-${blockKey}`,
+      () => listBlockTripSpans.run({ serviceDate, blockIds }, this.db),
+      ms("12h"),
+    )
+
+    const byBlock = new Map<string, typeof spans>()
+    for (const span of spans) {
+      byBlock.set(span.block_id, [...(byBlock.get(span.block_id) ?? []), span])
+    }
+
+    for (const trips of byBlock.values()) {
+      const ordered = [...trips].sort((a, b) => a.starts_at - b.starts_at)
+
+      for (let i = 1; i < ordered.length; i++) {
+        predecessors.set(ordered[i].trip_id, {
+          tripId: ordered[i - 1].trip_id,
+          // Negative gaps would mean the timetable overlaps itself; clamp
+          // rather than treat it as recovery time that does not exist.
+          layoverSeconds: Math.max(
+            0,
+            ordered[i].starts_at - ordered[i - 1].ends_at,
+          ),
+        })
+      }
+    }
+
+    return predecessors
   }
 
   async getUpcomingTripsForRoutesAtStops(
@@ -326,11 +432,28 @@ export class GtfsService implements FeedProvider {
     for (const scheduleDate of scheduleDates) {
       const staticTrips = (
         await Promise.all(
-          routes.map(({ routeId, stopId }) =>
-            this.getScheduleForRouteAtStop(routeId, stopId, scheduleDate),
-          ),
+          routes.map(async ({ routeId, stopId, directionId }) => {
+            const trips = await this.getScheduleForRouteAtStop(
+              routeId,
+              stopId,
+              scheduleDate,
+            )
+
+            // Filtered here rather than in the query so that directed and
+            // undirected requests share one cache entry. The query applies no
+            // row limit — it returns the whole service day for this route and
+            // stop — so filtering afterwards discards nothing a limit would
+            // have kept.
+            if (directionId === undefined || directionId === null) {
+              return trips
+            }
+
+            return trips.filter((trip) => trip.direction_id === directionId)
+          }),
         )
       ).flat()
+
+      const blockPredecessors = await this.getBlockPredecessors(staticTrips)
 
       staticTrips.forEach((staticTrip) => {
         const { tripUpdate, stopTimeUpdate, vehicle } =
@@ -339,8 +462,47 @@ export class GtfsService implements FeedProvider {
             tripUpdateIndex,
           )
 
-        const { arrivalTime, departureTime, isRealtime } =
+        let { arrivalTime, departureTime, isRealtime } =
           this.realtimeService.resolveTripTimes(staticTrip, stopTimeUpdate)
+
+        let predictionSource: "trip" | "block" | null = isRealtime
+          ? "trip"
+          : null
+        let predictedVehicle = vehicle
+
+        // Nothing published for this trip, but the vehicle that will operate it
+        // may already be running its previous trip on the same block. Producers
+        // commonly publish only for trips that have left their origin, which
+        // leaves an upcoming departure with no prediction even though the
+        // vehicle is being tracked.
+        if (!isRealtime) {
+          const predecessor = blockPredecessors.get(staticTrip.trip_id)
+          const carried = predecessor
+            ? this.realtimeService.resolveBlockDelay(
+                predecessor.tripId,
+                predecessor.layoverSeconds,
+                tripUpdateIndex,
+              )
+            : null
+
+          if (carried) {
+            const propagated = this.realtimeService.resolveTripTimes(
+              staticTrip,
+              {
+                arrival: { delay: carried.delay },
+                departure: { delay: carried.delay },
+              },
+            )
+
+            if (propagated.isRealtime) {
+              arrivalTime = propagated.arrivalTime
+              departureTime = propagated.departureTime
+              isRealtime = true
+              predictionSource = "block"
+              predictedVehicle = carried.vehicle
+            }
+          }
+        }
 
         if (departureTime.getTime() < now) {
           return
@@ -400,8 +562,9 @@ export class GtfsService implements FeedProvider {
           stopName: staticTrip.stop_name ?? "Unnamed Stop",
           arrivalTime,
           departureTime,
-          vehicle: isRealtime ? vehicle : null,
+          vehicle: isRealtime ? predictedVehicle : null,
           isRealtime,
+          predictionSource,
         })
       })
     }

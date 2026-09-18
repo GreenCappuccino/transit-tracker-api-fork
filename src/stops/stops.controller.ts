@@ -58,6 +58,24 @@ class StopDto {
   lon!: number
 }
 
+class StopRouteDirectionDto {
+  @ApiProperty({
+    required: true,
+    nullable: true,
+    description:
+      "The direction of travel, or null when the provider has no direction concept",
+    example: "0",
+  })
+  directionId!: string | null
+
+  @ApiProperty({
+    required: true,
+    description: "Headsigns served in this direction at this stop",
+    example: ["Eastgate P&R"],
+  })
+  headsigns!: string[]
+}
+
 class StopRouteDto {
   @ApiProperty({
     required: true,
@@ -84,10 +102,20 @@ class StopRouteDto {
 
   @ApiProperty({
     required: true,
-    description: "List of headsigns (destinations) for this route at this stop",
+    description:
+      "List of headsigns (destinations) for this route at this stop, across all directions",
     example: ["Eastgate P&R"],
   })
   headsigns!: string[]
+
+  @ApiProperty({
+    required: true,
+    isArray: true,
+    type: StopRouteDirectionDto,
+    description:
+      "The same headsigns split by direction of travel. Providers without a direction concept return a single entry with a null directionId.",
+  })
+  directions!: StopRouteDirectionDto[]
 }
 
 @Controller("stops")

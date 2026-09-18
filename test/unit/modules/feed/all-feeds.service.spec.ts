@@ -99,6 +99,8 @@ describe("AllFeedsService", () => {
           departureTime: new Date(),
           vehicle: null,
           isRealtime: true,
+          directionId: null,
+          predictionSource: "trip",
         },
       ]
 
@@ -115,6 +117,8 @@ describe("AllFeedsService", () => {
           departureTime: new Date(),
           vehicle: null,
           isRealtime: false,
+          directionId: null,
+          predictionSource: null,
         },
       ]
 
@@ -191,12 +195,19 @@ describe("AllFeedsService", () => {
           name: "Route 1",
           color: "FF0000",
           headsigns: ["Destination 1", "Destination 2"],
+          directions: [
+            {
+              directionId: null,
+              headsigns: ["Destination 1", "Destination 2"],
+            },
+          ],
         },
         {
           routeId: "route2",
           name: "Route 2",
           color: "00FF00",
           headsigns: ["Destination 3"],
+          directions: [{ directionId: null, headsigns: ["Destination 3"] }],
         },
       ]
 

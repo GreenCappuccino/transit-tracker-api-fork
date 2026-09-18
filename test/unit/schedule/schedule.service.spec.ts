@@ -446,6 +446,51 @@ describe("ScheduleService", () => {
       expect(scheduleUpdates[1]!.trips.length).toBe(2)
     })
 
+    // A propagated delay floors at zero, so it commonly lands on exactly the
+    // scheduled time. When the trip then goes genuinely live and happens to be
+    // on time, every other compared field matches -- only the source moves.
+    it("publishes an update when only the prediction source changes", async () => {
+      // Arrange
+      const scheduleOptions: ScheduleOptions = {
+        feedCode: "testFeed",
+        routes: [{ routeId: "route1", stopId: "stop1", offset: 0 }],
+        limit: 5,
+      }
+
+      const inferred = makeMockTripStops("route1", "stop1", 1).map((trip) => ({
+        ...trip,
+        isRealtime: true,
+        predictionSource: "block" as const,
+      }))
+
+      const published = inferred.map((trip) => ({
+        ...trip,
+        predictionSource: "trip" as const,
+      }))
+
+      // Act
+      mockFeedProvider.getUpcomingTripsForRoutesAtStops.mockResolvedValue(
+        inferred,
+      )
+
+      const finish = collectValues(
+        scheduleService.subscribeToSchedule(scheduleOptions),
+      )
+
+      mockFeedProvider.getUpcomingTripsForRoutesAtStops.mockResolvedValue(
+        published,
+      )
+
+      await vi.advanceTimersByTimeAsync(45000)
+
+      const scheduleUpdates = finish()
+
+      // Assert
+      expect(scheduleUpdates.length).toBe(2)
+      expect(scheduleUpdates[0]!.trips[0]!.predictionSource).toBe("block")
+      expect(scheduleUpdates[1]!.trips[0]!.predictionSource).toBe("trip")
+    })
+
     it("does not publish an update if the schedule hasn't changed", async () => {
       // Arrange
       const scheduleOptions: ScheduleOptions = {
@@ -498,6 +543,7 @@ describe("ScheduleService", () => {
       routeColor: "#FFFFFF",
       stopName: `Stop ${stopId}`,
       headsign: `Headsign ${i}`,
+      predictionSource: null,
       directionId,
       arrivalTime: new Date(Date.now() + (i + 1) * 60000),
       departureTime: new Date(Date.now() + (i + 2) * 60000),
@@ -549,6 +595,48 @@ describe("ScheduleService", () => {
 
       // Act & Assert
       expect(() => scheduleService.parseRouteStopPairs(input)).toThrow()
+    })
+
+    it("should parse an optional direction suffix", () => {
+      // Arrange
+      const input = "route1@0,stop1;route2@1,stop2,30"
+
+      // Act
+      const result = scheduleService.parseRouteStopPairs(input)
+
+      // Assert
+      expect(result).toEqual([
+        { routeId: "route1", stopId: "stop1", directionId: "0", offset: 0 },
+        { routeId: "route2", stopId: "stop2", directionId: "1", offset: 30 },
+      ])
+    })
+
+    it("should leave the direction undefined when no suffix is given", () => {
+      // Act
+      const [pair] = scheduleService.parseRouteStopPairs("route1,stop1")
+
+      // Assert
+      expect(pair.directionId).toBeUndefined()
+    })
+
+    // Global ids are `feedCode:localId` and some providers use colons inside the
+    // local id, so the direction has to split on the last "@" rather than a colon.
+    it("should only split on the final @ of a namespaced route id", () => {
+      // Act
+      const [pair] = scheduleService.parseRouteStopPairs(
+        "mvg:swm:02U06@1,mvg:de:09162:70",
+      )
+
+      // Assert
+      expect(pair.routeId).toBe("mvg:swm:02U06")
+      expect(pair.directionId).toBe("1")
+      expect(pair.stopId).toBe("mvg:de:09162:70")
+    })
+
+    it("should throw an error when the direction is empty", () => {
+      expect(() =>
+        scheduleService.parseRouteStopPairs("route1@,stop1"),
+      ).toThrow()
     })
   })
 })

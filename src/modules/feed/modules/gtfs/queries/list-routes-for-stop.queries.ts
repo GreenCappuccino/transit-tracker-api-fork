@@ -11,6 +11,7 @@ export interface IListRoutesForStopParams {
 
 /** 'ListRoutesForStop' return type */
 export interface IListRoutesForStopResult {
+  direction_id: number | null
   headsigns: Json | null
   route_color: string | null
   route_id: string
@@ -31,11 +32,11 @@ const listRoutesForStopIR: any = {
       name: "stopId",
       required: true,
       transform: { type: "scalar" },
-      locs: [{ a: 447, b: 454 }],
+      locs: [{ a: 469, b: 476 }],
     },
   ],
   statement:
-    'SELECT\n  routes.route_id,\n  routes.route_short_name,\n  routes.route_long_name,\n  routes.route_color,\n  JSON_AGG(DISTINCT CASE \n    WHEN coalesce(TRIM(stop_times.stop_headsign), \'\') = \'\' THEN trips.trip_headsign\n    ELSE stop_times.stop_headsign\n  END) AS headsigns\nFROM "stop_times" stop_times\nINNER JOIN "trips" trips ON stop_times.trip_id = trips.trip_id\nINNER JOIN "routes" routes ON trips.route_id = routes.route_id\nWHERE stop_times.stop_id = :stopId!\nGROUP BY\n  routes.route_id,\n  routes.route_short_name,\n  routes.route_long_name,\n  routes.route_color\nORDER BY routes.route_short_name',
+    'SELECT\n  routes.route_id,\n  routes.route_short_name,\n  routes.route_long_name,\n  routes.route_color,\n  trips.direction_id,\n  JSON_AGG(DISTINCT CASE \n    WHEN coalesce(TRIM(stop_times.stop_headsign), \'\') = \'\' THEN trips.trip_headsign\n    ELSE stop_times.stop_headsign\n  END) AS headsigns\nFROM "stop_times" stop_times\nINNER JOIN "trips" trips ON stop_times.trip_id = trips.trip_id\nINNER JOIN "routes" routes ON trips.route_id = routes.route_id\nWHERE stop_times.stop_id = :stopId!\nGROUP BY\n  routes.route_id,\n  routes.route_short_name,\n  routes.route_long_name,\n  routes.route_color,\n  trips.direction_id\nORDER BY routes.route_short_name, trips.direction_id',
 }
 
 /**
@@ -46,6 +47,7 @@ const listRoutesForStopIR: any = {
  *   routes.route_short_name,
  *   routes.route_long_name,
  *   routes.route_color,
+ *   trips.direction_id,
  *   JSON_AGG(DISTINCT CASE
  *     WHEN coalesce(TRIM(stop_times.stop_headsign), '') = '' THEN trips.trip_headsign
  *     ELSE stop_times.stop_headsign
@@ -58,8 +60,9 @@ const listRoutesForStopIR: any = {
  *   routes.route_id,
  *   routes.route_short_name,
  *   routes.route_long_name,
- *   routes.route_color
- * ORDER BY routes.route_short_name
+ *   routes.route_color,
+ *   trips.direction_id
+ * ORDER BY routes.route_short_name, trips.direction_id
  * ```
  */
 export const listRoutesForStop = new PreparedQuery<

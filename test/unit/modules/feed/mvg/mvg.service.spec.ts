@@ -161,12 +161,19 @@ describe("MvgService", () => {
           name: "U6",
           color: null,
           headsigns: ["Garching", "Klinikum Großhadern"],
+          directions: [
+            {
+              directionId: null,
+              headsigns: ["Garching", "Klinikum Großhadern"],
+            },
+          ],
         },
         {
           routeId: "swm:02U03",
           name: "U3",
           color: null,
           headsigns: ["Moosach"],
+          directions: [{ directionId: null, headsigns: ["Moosach"] }],
         },
       ])
     })
@@ -282,6 +289,7 @@ describe("MvgService", () => {
           departureTime: new Date(NOW + ms("7m")),
           vehicle: null,
           isRealtime: true,
+          predictionSource: "trip",
         },
       ])
     })

@@ -201,7 +201,8 @@ CREATE TABLE public.trips (
     route_id text,
     service_id text,
     trip_headsign text,
-    direction_id integer
+    direction_id integer,
+    block_id text
 )
 PARTITION BY LIST (feed_code);
 

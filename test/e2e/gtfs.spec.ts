@@ -122,7 +122,7 @@ describe("GTFS E2E test", () => {
       .expect("Content-Type", /json/)
       .expect(200)
 
-    expect(response.body).toHaveLength(5)
+    expect(response.body).toHaveLength(6)
 
     const feed = response.body.find((f: any) => f.code === "testfeed")
 
@@ -160,8 +160,28 @@ describe("GTFS E2E test", () => {
       .expect(200)
 
     expect(response.body).toMatchSnapshot()
-    // Two feeds serve this fixture: testfeed and njtfeed.
-    expect(response.body).toHaveLength(4)
+    // Three feeds serve this fixture: testfeed, njtfeed and blockfeed.
+    expect(response.body).toHaveLength(6)
+  })
+
+  // One stop id serving both directions is the normal case for rail-type stops,
+  // where the undirected headsign list mixes inbound and outbound destinations.
+  test("GET /stops/:id/routes exposes directions separately", async () => {
+    const response = await request(app.getHttpServer())
+      .get("/stops/testfeed:AMV/routes")
+      .expect(200)
+
+    const route = response.body[0]
+
+    // The union is preserved for clients that predate `directions`.
+    expect(route.headsigns).toEqual(
+      expect.arrayContaining(["to Airport", "to Amargosa Valley"]),
+    )
+
+    expect(route.directions).toEqual([
+      { directionId: "0", headsigns: ["to Amargosa Valley"] },
+      { directionId: "1", headsigns: ["to Airport"] },
+    ])
   })
 
   test("GET /stops/:id/routes", async () => {
@@ -194,6 +214,48 @@ describe("GTFS E2E test", () => {
       expect(response.body).toHaveProperty("trips")
       return response.body.trips as TripDto[]
     }
+
+    describe("direction selection", () => {
+      async function headsignsFor(pair: string) {
+        const response = await request(app.getHttpServer())
+          .get(`/schedule/${pair}`)
+          .expect(200)
+
+        return [
+          ...new Set((response.body.trips as TripDto[]).map((t) => t.headsign)),
+        ].sort()
+      }
+
+      it("returns both directions when none is given", async () => {
+        await expect(
+          headsignsFor("testfeed:AAMV,testfeed:BEATTY_AIRPORT"),
+        ).resolves.toEqual(["to Airport", "to Amargosa Valley"])
+      })
+
+      it("returns only the requested direction", async () => {
+        await expect(
+          headsignsFor("testfeed:AAMV@1,testfeed:BEATTY_AIRPORT"),
+        ).resolves.toEqual(["to Airport"])
+
+        await expect(
+          headsignsFor("testfeed:AAMV@0,testfeed:BEATTY_AIRPORT"),
+        ).resolves.toEqual(["to Amargosa Valley"])
+      })
+
+      it("returns nothing for a direction that does not run here", async () => {
+        const response = await request(app.getHttpServer())
+          .get("/schedule/testfeed:AAMV@7,testfeed:BEATTY_AIRPORT")
+          .expect(200)
+
+        expect(response.body.trips).toHaveLength(0)
+      })
+
+      it("rejects an empty direction", async () => {
+        await request(app.getHttpServer())
+          .get("/schedule/testfeed:AAMV@,testfeed:BEATTY_AIRPORT")
+          .expect(400)
+      })
+    })
 
     test("with static schedule", async () => {
       const trips = await getTripSchedule()
@@ -623,6 +685,38 @@ describe("GTFS E2E test", () => {
         )
       })
 
+      // An overnight trip's GTFS service date is the day it *started*, not the
+      // calendar date its post-midnight stop falls on. A producer sending the
+      // spec-correct start_date previously failed to match, because the service
+      // derived one by adding the stop time to the service day.
+      test("matches an overnight trip by its service date", async () => {
+        mockDateTimeNow.mockReturnValue(new Date("2008-01-05T08:25:00.000Z"))
+
+        fakeGtfs.setTripUpdates([
+          {
+            trip: {
+              tripId: "STBA_OVERNIGHT",
+              // The service day it departed on, though it arrives on the 5th.
+              startDate: "20080104",
+              scheduleRelationship:
+                GtfsRt.TripDescriptor.ScheduleRelationship.SCHEDULED,
+            },
+            stopTimeUpdate: [
+              { stopId: "STAGECOACH", arrival: { time: 1199521830 } },
+            ],
+          },
+        ])
+
+        const trips = await getTripSchedule()
+        const overnightTrips = trips.filter(
+          (trip) => trip.tripId === "testfeed:STBA_OVERNIGHT",
+        )
+
+        expect(overnightTrips.length).toBeGreaterThan(0)
+        expect(overnightTrips[0].arrivalTime).toBe(1199521830)
+        expect(overnightTrips[0].isRealtime).toBe(true)
+      })
+
       test("with update to overnight trip (crossing midnight)", async () => {
         mockDateTimeNow.mockReturnValue(new Date("2008-01-05T08:25:00.000Z"))
 
@@ -786,6 +880,207 @@ describe("GTFS E2E test", () => {
         expect(trip!.departureTime).toBe(scheduledDepartureTime + delaySeconds)
         expect(trip!.vehicle).toBe("1594")
         expect(trip!.isRealtime).toBe(true)
+      })
+
+      // A NO_DATA stop predicts nothing. Reporting it as realtime showed the
+      // scheduled time wearing a live badge.
+      test("is not realtime for a NO_DATA stop", async () => {
+        fakeGtfs.setTripUpdates([
+          {
+            trip: {
+              tripId: "CITY1",
+              startDate: "20080104",
+              scheduleRelationship:
+                GtfsRt.TripDescriptor.ScheduleRelationship.SCHEDULED,
+            },
+            stopTimeUpdate: [
+              {
+                stopSequence: 2,
+                scheduleRelationship:
+                  GtfsRt.TripUpdate.StopTimeUpdate.ScheduleRelationship.NO_DATA,
+              },
+            ],
+            vehicle: { id: "53967", label: "1594" },
+          },
+        ])
+
+        const trips = await getTripSchedule("testfeed:CITY,testfeed:NADAV")
+        const trip = trips.find((trip) => trip.tripId === "testfeed:CITY1")
+        expect(trip).toBeDefined()
+
+        expect(trip!.arrivalTime).toBe(1199455920)
+        expect(trip!.departureTime).toBe(1199456040)
+        expect(trip!.isRealtime).toBe(false)
+        expect(trip!.vehicle).toBeNull()
+      })
+
+      // NO_DATA at our stop used to shadow a usable delay from an earlier one.
+      test("falls through a NO_DATA stop to an earlier stop's delay", async () => {
+        const delaySeconds = 120
+        fakeGtfs.setTripUpdates([
+          {
+            trip: {
+              tripId: "CITY1",
+              startDate: "20080104",
+              scheduleRelationship:
+                GtfsRt.TripDescriptor.ScheduleRelationship.SCHEDULED,
+            },
+            stopTimeUpdate: [
+              { stopSequence: 0, arrival: { delay: delaySeconds } },
+              {
+                stopSequence: 2,
+                scheduleRelationship:
+                  GtfsRt.TripUpdate.StopTimeUpdate.ScheduleRelationship.NO_DATA,
+              },
+            ],
+            vehicle: { id: "53967", label: "1594" },
+          },
+        ])
+
+        const trips = await getTripSchedule("testfeed:CITY,testfeed:NADAV")
+        const trip = trips.find((trip) => trip.tripId === "testfeed:CITY1")
+        expect(trip).toBeDefined()
+
+        expect(trip!.arrivalTime).toBe(1199455920 + delaySeconds)
+        expect(trip!.departureTime).toBe(1199456040 + delaySeconds)
+        expect(trip!.isRealtime).toBe(true)
+        expect(trip!.vehicle).toBe("1594")
+      })
+
+      // Only a delay survives the fallback synthesis, so an earlier stop with
+      // absolute times but no delay contributed nothing while still reading as
+      // realtime.
+      test("is not realtime when the only earlier stop has no delay", async () => {
+        fakeGtfs.setTripUpdates([
+          {
+            trip: {
+              tripId: "CITY1",
+              startDate: "20080104",
+              scheduleRelationship:
+                GtfsRt.TripDescriptor.ScheduleRelationship.SCHEDULED,
+            },
+            stopTimeUpdate: [
+              { stopSequence: 0, arrival: { time: 1199455800 } },
+            ],
+            vehicle: { id: "53967", label: "1594" },
+          },
+        ])
+
+        const trips = await getTripSchedule("testfeed:CITY,testfeed:NADAV")
+        const trip = trips.find((trip) => trip.tripId === "testfeed:CITY1")
+        expect(trip).toBeDefined()
+
+        expect(trip!.arrivalTime).toBe(1199455920)
+        expect(trip!.isRealtime).toBe(false)
+        expect(trip!.vehicle).toBeNull()
+      })
+
+      test("uses the vehicle id when no label is set", async () => {
+        fakeGtfs.setTripUpdates([
+          {
+            trip: {
+              tripId: "CITY1",
+              startDate: "20080104",
+              scheduleRelationship:
+                GtfsRt.TripDescriptor.ScheduleRelationship.SCHEDULED,
+            },
+            stopTimeUpdate: [{ stopSequence: 2, arrival: { delay: 60 } }],
+            vehicle: { id: "0053" },
+          },
+        ])
+
+        const trips = await getTripSchedule("testfeed:CITY,testfeed:NADAV")
+        const trip = trips.find((trip) => trip.tripId === "testfeed:CITY1")
+        expect(trip).toBeDefined()
+
+        expect(trip!.isRealtime).toBe(true)
+        expect(trip!.vehicle).toBe("0053")
+      })
+
+      // NJ TRANSIT, like many producers, publishes updates only for trips that
+      // have left their origin, so an upcoming departure has no prediction even
+      // when the vehicle that will operate it is already being tracked on its
+      // previous trip. The fixture block runs BFC2 (11:00-12:00) then AB2
+      // (12:05-12:15), a five minute layover.
+      describe("block delay propagation", () => {
+        const AB2_SCHEDULED_ARRIVAL = 1199477700 // 12:15 America/Los_Angeles
+
+        function delayBfc2(delaySeconds: number) {
+          fakeGtfs.setTripUpdates([
+            {
+              trip: {
+                tripId: "BFC2",
+                startDate: "20080104",
+                scheduleRelationship:
+                  GtfsRt.TripDescriptor.ScheduleRelationship.SCHEDULED,
+              },
+              stopTimeUpdate: [
+                {
+                  stopSequence: 2,
+                  arrival: { delay: delaySeconds },
+                  departure: { delay: delaySeconds },
+                },
+              ],
+              vehicle: { id: "9001", label: "block-runner" },
+            },
+          ])
+        }
+
+        async function ab2For(feedCode: string) {
+          const response = await request(app.getHttpServer())
+            .get(`/schedule/${feedCode}:AB,${feedCode}:BEATTY_AIRPORT`)
+            .expect(200)
+
+          return (response.body.trips as TripDto[]).find(
+            (trip) => trip.tripId === `${feedCode}:AB2`,
+          )
+        }
+
+        it("carries a delay forward, less the scheduled layover", async () => {
+          // Ten minutes late into the terminal, five minutes of layover.
+          delayBfc2(600)
+
+          const trip = await ab2For("blockfeed")
+
+          expect(trip).toBeDefined()
+          expect(trip!.isRealtime).toBe(true)
+          expect(trip!.predictionSource).toBe("block")
+          expect(trip!.arrivalTime).toBe(AB2_SCHEDULED_ARRIVAL + 300)
+          // The same physical vehicle, so its identifier carries over.
+          expect(trip!.vehicle).toBe("block-runner")
+        })
+
+        it("predicts on time when the layover absorbs the delay", async () => {
+          // Four minutes late, five minutes of layover: it leaves on time, and
+          // that is a prediction rather than an absence of one.
+          delayBfc2(240)
+
+          const trip = await ab2For("blockfeed")
+
+          expect(trip!.isRealtime).toBe(true)
+          expect(trip!.predictionSource).toBe("block")
+          expect(trip!.arrivalTime).toBe(AB2_SCHEDULED_ARRIVAL)
+        })
+
+        it("does nothing for a feed that has not opted in", async () => {
+          delayBfc2(600)
+
+          const trip = await ab2For("testfeed")
+
+          expect(trip).toBeDefined()
+          expect(trip!.isRealtime).toBe(false)
+          expect(trip!.predictionSource).toBeNull()
+          expect(trip!.arrivalTime).toBe(AB2_SCHEDULED_ARRIVAL)
+        })
+
+        it("does nothing when the preceding trip has no realtime", async () => {
+          fakeGtfs.setTripUpdates([])
+
+          const trip = await ab2For("blockfeed")
+
+          expect(trip!.isRealtime).toBe(false)
+          expect(trip!.predictionSource).toBeNull()
+        })
       })
 
       test("with fallback delay when multiple previous stops exist", async () => {
