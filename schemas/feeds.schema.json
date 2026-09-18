@@ -290,6 +290,9 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "auth": {
+          "$ref": "#/$defs/FeedAuth"
         }
       },
       "required": [
@@ -307,6 +310,131 @@
           "description": "Shorthand for specifying a URL. If a string is provided where an HttpRequestOptions object is expected, it will be interpreted as the URL with no additional headers."
         }
       ]
+    },
+    "FeedAuth": {
+      "type": "object",
+      "description": "Authentication for this request. Discriminated on `provider`. Use a YAML anchor to declare it once and reference it from both `static` and `rtTripUpdates`.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NjTransitAuth"
+        }
+      ]
+    },
+    "NjTransitAuth": {
+      "type": "object",
+      "description": "NJ TRANSIT's GTFS/GTFS-RT API, which requires a session token obtained by logging in. Register at https://developer.njtransit.com/registration. Note that NJ TRANSIT limits token issuance to 10 calls per account per day and exceeding it locks the account out until midnight Eastern.",
+      "properties": {
+        "provider": {
+          "const": "njtransit"
+        },
+        "api": {
+          "enum": [
+            "rail",
+            "bus"
+          ],
+          "description": "Which endpoint family to use. Rail and bus are separate APIs on different hosts, with separate accounts and separate daily token budgets."
+        },
+        "baseUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Overrides the built-in base URL. Intended for tests and staging."
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Username, inline. Prefer `usernameFile` in production."
+        },
+        "usernameFile": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path to a file containing the username. Relative paths resolve against $CREDENTIALS_DIRECTORY when systemd has set it."
+        },
+        "password": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Password, inline. Prefer `passwordFile` in production."
+        },
+        "passwordFile": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path to a file containing the password. Relative paths resolve against $CREDENTIALS_DIRECTORY when systemd has set it."
+        },
+        "dailyTokenBudget": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 6,
+          "description": "Maximum login calls per Eastern day. NJ TRANSIT's own hard limit is 10; the default leaves headroom for manual debugging against the same account."
+        },
+        "tokenMaxAge": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer",
+              "minimum": 1
+            }
+          ],
+          "default": "20h",
+          "description": "Re-authenticate once the cached token is older than this, as a duration string such as '20h' or a number of milliseconds."
+        }
+      },
+      "required": [
+        "provider",
+        "api"
+      ],
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "required": [
+                "username"
+              ],
+              "not": {
+                "required": [
+                  "usernameFile"
+                ]
+              }
+            },
+            {
+              "required": [
+                "usernameFile"
+              ],
+              "not": {
+                "required": [
+                  "username"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "oneOf": [
+            {
+              "required": [
+                "password"
+              ],
+              "not": {
+                "required": [
+                  "passwordFile"
+                ]
+              }
+            },
+            {
+              "required": [
+                "passwordFile"
+              ],
+              "not": {
+                "required": [
+                  "password"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "additionalProperties": false
     }
   }
 }
